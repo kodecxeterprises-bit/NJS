@@ -1,0 +1,43 @@
+
+name: Validate NJS MVP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: njs-platform---ai-b2b-matchmaking/package.json
+
+      - name: Install dependencies
+        working-directory: njs-platform---ai-b2b-matchmaking
+        run: npm install --no-audit --no-fund
+
+      - name: Check TypeScript
+        working-directory: njs-platform---ai-b2b-matchmaking
+        run: npm run lint
+
+      - name: Build production frontend
+        working-directory: njs-platform---ai-b2b-matchmaking
+        run: npm run build
+
+      - name: Upload production build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: njs-production-build
+          path: njs-platform---ai-b2b-matchmaking/dist/
+          if-no-files-found: error
+          retention-days: 7
