@@ -1,0 +1,6 @@
+{
+  "name": "NJS Platform - AI B2B Matchmaking",
+  "description": "Enterprise AI-powered B2B business matchmaking platform to discover partners, suppliers, manufacturers, and opportunities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
