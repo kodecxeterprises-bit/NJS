@@ -1,0 +1,45 @@
+
+name: Extract NJS Project
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract NJS ZIP
+        run: |
+          if [ ! -f "NJS.zip" ]; then
+            echo "NJS.zip was not found in the repository root."
+            exit 1
+          fi
+
+          mkdir -p /tmp/njs-extracted
+          unzip -q NJS.zip -d /tmp/njs-extracted
+
+          PROJECT="/tmp/njs-extracted/njs-platform---ai-b2b-matchmaking"
+
+          if [ ! -f "$PROJECT/package.json" ]; then
+            echo "Could not find the project package.json."
+            find /tmp/njs-extracted -maxdepth 3 -type f | head -50
+            exit 1
+          fi
+
+          cp -a "$PROJECT"/. .
+          rm -f NJS.zip
+
+      - name: Commit extracted files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Extract NJS project files" || echo "No changes to commit"
+          git push
