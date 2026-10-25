@@ -1,11 +1,13 @@
+
 import fs from 'fs';
 import path from 'path';
 
 export interface User {
   id: string;
+  supabaseUserId?: string;
   name: string;
   email: string;
-  passwordHash: string; // Stored securely
+  passwordHash: string;
   profileImage?: string;
   isEmailVerified: boolean;
   verificationCode?: string;
@@ -80,7 +82,7 @@ export interface BusinessMatch {
   id: string;
   userBusinessId: string;
   matchedBusinessId: string;
-  score: number; // e.g., 95
+  score: number;
   whyThisMatch: string;
   criteriaMatched: string[];
   requestId?: string;
@@ -268,6 +270,7 @@ class DatabaseStore {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
+
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.data = JSON.parse(raw);
@@ -281,13 +284,16 @@ class DatabaseStore {
 
   private save() {
     try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      fs.writeFileSync(
+        DB_FILE,
+        JSON.stringify(this.data, null, 2),
+        'utf-8'
+      );
     } catch (e) {
       console.error('Failed to write database file:', e);
     }
   }
 
-  // Generic accessors
   public get(): DatabaseSchema {
     return this.data;
   }
@@ -302,13 +308,25 @@ class DatabaseStore {
     return this.data.users.find(u => u.id === id);
   }
 
+  // Find an existing NJS account linked to a Supabase user.
+  public findUserBySupabaseId(
+    supabaseUserId: string
+  ): User | undefined {
+    return this.data.users.find(
+      u => u.supabaseUserId === supabaseUserId
+    );
+  }
+
   public findUserByEmail(email: string): User | undefined {
-    return this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    return this.data.users.find(
+      u => u.email.toLowerCase() === email.toLowerCase()
+    );
   }
 
   public createUser(user: User): User {
     this.data.users.push(user);
-    // Auto-create free subscription with credits
+
+    // Auto-create the free subscription with credits.
     this.data.subscriptions.push({
       id: 'sub_' + Math.random().toString(36).substring(2, 9),
       userId: user.id,
@@ -317,24 +335,38 @@ class DatabaseStore {
       creditsAvailable: 4850,
       updatedAt: new Date().toISOString(),
     });
+
     this.save();
     return user;
   }
 
-  public updateUser(id: string, updates: Partial<User>): User | undefined {
+  public updateUser(
+    id: string,
+    updates: Partial<User>
+  ): User | undefined {
     const user = this.findUserById(id);
     if (!user) return undefined;
-    Object.assign(user, updates, { updatedAt: new Date().toISOString() });
+
+    Object.assign(user, updates, {
+      updatedAt: new Date().toISOString(),
+    });
+
     this.save();
     return user;
   }
 
   // Business Profiles
-  public getBusinessProfileByUserId(userId: string): BusinessProfile | undefined {
-    return this.data.business_profiles.find(p => p.userId === userId);
+  public getBusinessProfileByUserId(
+    userId: string
+  ): BusinessProfile | undefined {
+    return this.data.business_profiles.find(
+      p => p.userId === userId
+    );
   }
 
-  public getBusinessProfileById(id: string): BusinessProfile | undefined {
+  public getBusinessProfileById(
+    id: string
+  ): BusinessProfile | undefined {
     return this.data.business_profiles.find(p => p.id === id);
   }
 
@@ -342,22 +374,29 @@ class DatabaseStore {
     return this.data.business_profiles;
   }
 
-  public upsertBusinessProfile(profile: BusinessProfile): BusinessProfile {
-    const idx = this.data.business_profiles.findIndex(p => p.id === profile.id || p.userId === profile.userId);
+  public upsertBusinessProfile(
+    profile: BusinessProfile
+  ): BusinessProfile {
+    const idx = this.data.business_profiles.findIndex(
+      p => p.id === profile.id || p.userId === profile.userId
+    );
+
     if (idx >= 0) {
       this.data.business_profiles[idx] = {
         ...this.data.business_profiles[idx],
         ...profile,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
     } else {
       this.data.business_profiles.push(profile);
     }
-    // Update user link
+
+    // Maintain the user-to-business-profile link.
     const user = this.findUserById(profile.userId);
     if (user && user.businessProfileId !== profile.id) {
       user.businessProfileId = profile.id;
     }
+
     this.save();
     return profile;
   }
