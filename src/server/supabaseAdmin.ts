@@ -1,21 +1,19 @@
-import { supabaseAdmin } from './supabaseAdmin';
+import { createClient } from '@supabase/supabase-js';
 
-async function getSupabaseUser(req: Request) {
-  const authHeader = req.headers.authorization;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 
-  if (!authHeader?.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const accessToken = authHeader.slice(7);
-
-  const { data, error } = await supabaseAdmin.auth.getUser(
-    accessToken
-  );
-
-  if (error || !data.user) {
-    return null;
-  }
-
-  return data.user;
+if (!supabaseUrl || !supabaseSecretKey) {
+  throw new Error('Missing server-side Supabase configuration');
 }
+
+export const supabaseAdmin = createClient(
+  supabaseUrl,
+  supabaseSecretKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
+);
