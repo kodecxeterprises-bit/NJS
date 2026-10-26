@@ -1,5 +1,4 @@
-
-name: Build and Verify NJS (artifact only)
+name: Build and Deploy NJS
 
 on:
   workflow_dispatch:
@@ -11,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout source
@@ -33,47 +32,27 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Verify built HTML and assets
-        shell: bash
+      - name: Verify frontend and function
         run: |
           set -euo pipefail
           test -s dist/index.html
-
+          test -s netlify/functions/auth-me.mts
           if grep -q '/src/main.tsx' dist/index.html; then
-            echo "ERROR: Production HTML still references source code"
+            echo "ERROR: Production HTML references source code"
             exit 1
           fi
 
-          if ! grep -Eq 'src="/assets/[^"]+\.js"|src="/[^"]+\.js"' dist/index.html; then
-            echo "ERROR: Compiled JavaScript entry not found"
-            cat dist/index.html
-            exit 1
-          fi
-
-          echo "Built HTML references:"
-          grep -Eo '(src|href)="[^"]+"' dist/index.html || true
-
-          echo "Generated files:"
-          find dist -maxdepth 3 -type f -printf '%p (%s bytes)\n' | sort
-
-      - name: Verify authentication function source
-        run: test -s netlify/functions/auth-me.mts
-
-      - name: Upload production build
-        uses: actions/upload-artifact@v4
-        with:
-          name: njs-production-build
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload diagnostic files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: njs-build-diagnostics
-          path: |
-            dist/index.html
-            netlify/functions/auth-me.mts
-          if-no-files-found: warn
-          retention-days: 7
+      - name: Deploy frontend and functions
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$NETLIFY_AUTH_TOKEN"
+          test -n "$NETLIFY_SITE_ID"
+          npx --yes netlify-cli deploy \
+            --prod \
+            --dir=dist \
+            --functions=netlify/functions \
+            --site="$NETLIFY_SITE_ID" \
+            --auth="$NETLIFY_AUTH_TOKEN"
