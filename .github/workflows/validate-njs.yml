@@ -1,78 +1,79 @@
+
 name: Build and Verify NJS (artifact only)
 
 on:
-workflow_dispatch:
-push:
-branches:
-- codex/supabase-auth-migration
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/supabase-auth-migration
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-build:
-runs-on: ubuntu-latest
-timeout-minutes: 20
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
-steps:  
-  - name: Checkout source  
-    uses: actions/checkout@v4  
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-  - name: Set up Node.js  
-    uses: actions/setup-node@v4  
-    with:  
-      node-version: 22  
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-  - name: Install dependencies  
-    run: npm install --no-audit --no-fund  
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
 
-  - name: Build production frontend  
-    run: npm run build  
-    env:  
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}  
-      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}  
+      - name: Build production frontend
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-  - name: Verify built HTML and assets  
-    shell: bash  
-    run: |  
-      set -euo pipefail  
-      test -s dist/index.html  
+      - name: Verify built HTML and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/index.html
 
-      if grep -q '/src/main.tsx' dist/index.html; then  
-        echo "ERROR: Production HTML still references source code"  
-        exit 1  
-      fi  
+          if grep -q '/src/main.tsx' dist/index.html; then
+            echo "ERROR: Production HTML still references source code"
+            exit 1
+          fi
 
-      if ! grep -Eq 'src="/assets/[^"]+\.js"|src="/[^"]+\.js"' dist/index.html; then  
-        echo "ERROR: Compiled JavaScript entry not found"  
-        cat dist/index.html  
-        exit 1  
-      fi  
+          if ! grep -Eq 'src="/assets/[^"]+\.js"|src="/[^"]+\.js"' dist/index.html; then
+            echo "ERROR: Compiled JavaScript entry not found"
+            cat dist/index.html
+            exit 1
+          fi
 
-      echo "Built HTML references:"  
-      grep -Eo '(src|href)="[^"]+"' dist/index.html || true  
+          echo "Built HTML references:"
+          grep -Eo '(src|href)="[^"]+"' dist/index.html || true
 
-      echo "Generated files:"  
-      find dist -maxdepth 3 -type f -printf '%p (%s bytes)\n' | sort  
+          echo "Generated files:"
+          find dist -maxdepth 3 -type f -printf '%p (%s bytes)\n' | sort
 
-  - name: Verify authentication function source  
-    run: test -s netlify/functions/auth-me.mts  
+      - name: Verify authentication function source
+        run: test -s netlify/functions/auth-me.mts
 
-  - name: Upload production build  
-    uses: actions/upload-artifact@v4  
-    with:  
-      name: njs-production-build  
-      path: dist/  
-      if-no-files-found: error  
-      retention-days: 7  
+      - name: Upload production build
+        uses: actions/upload-artifact@v4
+        with:
+          name: njs-production-build
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
 
-  - name: Upload diagnostic files  
-    if: always()  
-    uses: actions/upload-artifact@v4  
-    with:  
-      name: njs-build-diagnostics  
-      path: |  
-        dist/index.html  
-        netlify/functions/auth-me.mts  
-      if-no-files-found: warn  
-      retention-days: 7
+      - name: Upload diagnostic files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: njs-build-diagnostics
+          path: |
+            dist/index.html
+            netlify/functions/auth-me.mts
+          if-no-files-found: warn
+          retention-days: 7
