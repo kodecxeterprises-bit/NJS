@@ -1,5 +1,5 @@
 
-name: Build and Deploy NJS to Netlify
+name: Build and Verify NJS (artifact only)
 
 on:
   workflow_dispatch:
@@ -10,17 +10,13 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: njs-netlify-production
-  cancel-in-progress: false
-
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
-      - name: Checkout NJS source
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up Node.js
@@ -37,39 +33,47 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Verify deployment files
+      - name: Verify built HTML and assets
+        shell: bash
         run: |
-          test -f dist/index.html || {
-            echo "ERROR: dist/index.html is missing"
-            exit 1
-          }
+          set -euo pipefail
+          test -s dist/index.html
 
-          test -f netlify/functions/auth-me.mts || {
-            echo "ERROR: auth-me function source is missing"
-            exit 1
-          }
-
-          echo "Frontend and auth-me function source found."
-
-      - name: Deploy frontend and functions to Netlify
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        run: |
-          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
-            echo "ERROR: NETLIFY_AUTH_TOKEN secret is missing"
+          if grep -q '/src/main.tsx' dist/index.html; then
+            echo "ERROR: Production HTML still references source code"
             exit 1
           fi
 
-          if [ -z "$NETLIFY_SITE_ID" ]; then
-            echo "ERROR: NETLIFY_SITE_ID secret is missing"
+          if ! grep -Eq 'src="/assets/[^"]+\.js"|src="/[^"]+\.js"' dist/index.html; then
+            echo "ERROR: Compiled JavaScript entry not found"
+            cat dist/index.html
             exit 1
           fi
 
-          npx --yes netlify-cli deploy \
-            --prod \
-            --dir=dist \
-            --functions=netlify/functions \
-            --site="$NETLIFY_SITE_ID" \
-            --auth="$NETLIFY_AUTH_TOKEN" \
-            --message="NJS frontend and authentication function deployment"
+          echo "Built HTML references:"
+          grep -Eo '(src|href)="[^"]+"' dist/index.html || true
+
+          echo "Generated files:"
+          find dist -maxdepth 3 -type f -printf '%p (%s bytes)\n' | sort
+
+      - name: Verify authentication function source
+        run: test -s netlify/functions/auth-me.mts
+
+      - name: Upload production build
+        uses: actions/upload-artifact@v4
+        with:
+          name: njs-production-build
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload diagnostic files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: njs-build-diagnostics
+          path: |
+            dist/index.html
+            netlify/functions/auth-me.mts
+          if-no-files-found: warn
+          retention-days: 7
