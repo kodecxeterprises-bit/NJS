@@ -1,28 +1,36 @@
-name: Validate NJS MVP
+
+name: Build and Deploy NJS to Netlify
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - codex/supabase-auth-migration
+
+permissions:
+  contents: read
+
+concurrency:
+  group: njs-netlify-production
+  cancel-in-progress: false
 
 jobs:
-  validate:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout source code
+      - name: Checkout NJS source
         uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-
-      - name: Check TypeScript
-        run: npm run lint
 
       - name: Build production frontend
         run: npm run build
@@ -30,11 +38,39 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Upload production build
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: njs-production-build
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
+      - name: Verify deployment files
+        run: |
+          test -f dist/index.html || {
+            echo "ERROR: dist/index.html is missing"
+            exit 1
+          }
+
+          test -f netlify/functions/auth-me.mts || {
+            echo "ERROR: auth-me function source is missing"
+            exit 1
+          }
+
+          echo "Frontend and auth-me function source found."
+
+      - name: Deploy frontend and functions to Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "ERROR: NETLIFY_AUTH_TOKEN secret is missing"
+            exit 1
+          fi
+
+          if [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "ERROR: NETLIFY_SITE_ID secret is missing"
+            exit 1
+          fi
+
+          npx --yes netlify-cli deploy \
+            --prod \
+            --dir=dist \
+            --functions=netlify/functions \
+            --site="$NETLIFY_SITE_ID" \
+            --auth="$NETLIFY_AUTH_TOKEN" \
+            --message="NJS frontend and authentication function deployment"
