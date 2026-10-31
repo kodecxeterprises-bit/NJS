@@ -4,6 +4,9 @@
   "name": "njs",
   "main": "./cloudflare/worker.ts",
   "compatibility_date": "2026-10-31",
+  "vars": {
+    "SUPABASE_URL": "https://nmdzcclvjtuwidzbxvua.supabase.co"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
