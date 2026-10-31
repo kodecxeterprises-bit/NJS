@@ -2,7 +2,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "njs",
-  "main": "./worker/index.ts",
+  "main": "./cloudflare/worker.ts",
   "compatibility_date": "2026-10-31",
   "assets": {
     "not_found_handling": "single-page-application",
