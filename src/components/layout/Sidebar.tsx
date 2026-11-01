@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
@@ -16,7 +17,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   unreadNotificationsCount = 0,
 }) => {
-  const { user, businessProfile } = useAuth();
+  const { user, businessProfile, apiFetch } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setIsAdmin(false);
+
+    if (!user?.id) return;
+
+    apiFetch('/api/admin/overview')
+      .then(() => {
+        if (active) setIsAdmin(true);
+      })
+      .catch(() => {
+        if (active) setIsAdmin(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, apiFetch]);
 
   const navItems = [
     { id: 'dashboard', label: 'Overview', icon: 'dashboard' },
@@ -38,12 +59,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleItemClick = (id: string) => {
     onNavigate(id);
-    if (onCloseMobile) onCloseMobile();
+    onCloseMobile?.();
   };
+
+  const utilityButton = (
+    id: string,
+    label: string,
+    icon: string,
+    highlighted = false
+  ) => (
+    <button
+      key={id}
+      onClick={() => handleItemClick(id)}
+      className={`w-full flex items-center px-4 py-2.5 rounded-xl transition-all text-sm font-medium text-left ${
+        currentPath === id || highlighted
+          ? 'bg-primary-container text-on-primary-container font-semibold'
+          : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+      }`}
+    >
+      <span className="material-symbols-outlined mr-3 text-[20px] shrink-0">
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
 
   return (
     <>
-      {/* Mobile Backdrop */}
       {isOpenMobile && (
         <div
           className="fixed inset-0 bg-black/40 z-40 lg:hidden backdrop-blur-xs"
@@ -56,7 +98,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           isOpenMobile ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        {/* Brand */}
         <div className="px-6 mb-8 flex items-center justify-between">
           <div
             onClick={() => handleItemClick('dashboard')}
@@ -65,6 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="material-symbols-outlined text-primary text-[28px]">hub</span>
             <span>NJS Platform</span>
           </div>
+
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
@@ -75,59 +117,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {/* Main Nav */}
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = currentPath === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleItemClick(item.id)}
-                className={`w-full flex items-center px-4 py-2.5 rounded-xl transition-all text-sm font-medium text-left ${
-                  isActive
-                    ? 'bg-primary-container text-on-primary-container font-semibold shadow-xs'
-                    : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-                }`}
-              >
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleItemClick(item.id)}
+              className={`w-full flex items-center px-4 py-2.5 rounded-xl transition-all text-sm font-medium text-left ${
+                currentPath === item.id
+                  ? 'bg-primary-container text-on-primary-container font-semibold shadow-xs'
+                  : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <span className="material-symbols-outlined mr-3 text-[20px] shrink-0">
+                {item.icon}
+              </span>
+              <span className="truncate">{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="px-4 pt-4 border-t border-outline-variant/30 space-y-1">
+          {utilityButton('contact', 'Help & Support', 'support_agent')}
+
+          {bottomItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleItemClick(item.id)}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition-all text-sm font-medium text-left ${
+                currentPath === item.id
+                  ? 'bg-primary-container text-on-primary-container font-semibold'
+                  : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <div className="flex items-center">
                 <span className="material-symbols-outlined mr-3 text-[20px] shrink-0">
                   {item.icon}
                 </span>
-                <span className="truncate">{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+                <span>{item.label}</span>
+              </div>
 
-        {/* Bottom Menu */}
-        <div className="px-4 pt-4 border-t border-outline-variant/30 space-y-1">
-          {bottomItems.map((item) => {
-            const isActive = currentPath === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleItemClick(item.id)}
-                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition-all text-sm font-medium text-left ${
-                  isActive
-                    ? 'bg-primary-container text-on-primary-container font-semibold'
-                    : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-                }`}
-              >
-                <div className="flex items-center">
-                  <span className="material-symbols-outlined mr-3 text-[20px] shrink-0">
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
-                </div>
-                {item.badge ? (
-                  <span className="w-5 h-5 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center">
-                    {item.badge}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+              {item.badge ? (
+                <span className="w-5 h-5 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center">
+                  {item.badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
 
-          {/* Profile Button */}
+          {isAdmin &&
+            utilityButton(
+              'admin',
+              'Admin Dashboard',
+              'admin_panel_settings',
+              currentPath === 'admin'
+            )}
+
           <button
             onClick={() => handleItemClick('profile')}
             className={`w-full flex items-center px-4 py-2.5 rounded-xl transition-all text-sm font-medium text-left ${
@@ -139,6 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center mr-3 text-on-primary shrink-0 text-xs font-semibold">
               {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
             </div>
+
             <div className="flex flex-col min-w-0">
               <span className="truncate leading-tight font-medium text-on-surface">
                 {businessProfile?.businessName || user?.name || 'Profile'}
