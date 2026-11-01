@@ -232,7 +232,7 @@ useEffect(() => {
       );
     }
 
-    return <AdminDashboardPage />;
+    return <AdminDashboardPage onNavigate={navigate} />;
   }
 
   // 4. Authenticated Application Routes (Protected via AppLayout)
