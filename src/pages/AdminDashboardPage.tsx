@@ -141,7 +141,13 @@ const emptyStats: OverviewStats = {
   activeSupportTickets: 0,
 };
 
-export default function AdminDashboardPage() {
+interface AdminDashboardPageProps {
+  onNavigate: (path: string) => void;
+}
+
+export default function AdminDashboardPage({
+  onNavigate,
+}: AdminDashboardPageProps) {
   const auth = useAuth() as any;
   const apiFetch = auth.apiFetch;
   const signOut = auth.signOut;
