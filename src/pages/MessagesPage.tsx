@@ -1,4 +1,3 @@
-
 import React, {
   useCallback,
   useEffect,
@@ -290,6 +289,70 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({
       setMessages([]);
     }
   }, [activeConversationId, fetchMessages]);
+  // Mark incoming messages as read while their conversation is open.
+  useEffect(() => {
+    if (
+      !activeConversationId ||
+      !user?.id ||
+      isLoadingMessages
+    ) {
+      return;
+    }
+
+    const unreadIds = messages
+      .filter(
+        (message) =>
+          message.senderUserId !== user.id && !message.isRead
+      )
+      .map((message) => message.id);
+
+    if (unreadIds.length === 0) return;
+
+    let active = true;
+
+    const markMessagesAsRead = async () => {
+      const { error } = await supabase
+        .from('messages')
+        .update({ is_read: true })
+        .in('id', unreadIds)
+        .eq('conversation_id', activeConversationId)
+        .eq('is_read', false);
+
+      if (error) {
+        console.error('Unable to mark messages as read:', error);
+        return;
+      }
+
+      if (!active) return;
+
+      setMessages((current) =>
+        current.map((message) =>
+          unreadIds.includes(message.id)
+            ? { ...message, isRead: true }
+            : message
+        )
+      );
+
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === activeConversationId
+            ? { ...conversation, unreadCount: 0 }
+            : conversation
+        )
+      );
+    };
+
+    void markMessagesAsRead();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeConversationId,
+    user?.id,
+    messages,
+    isLoadingMessages,
+  ]);
 
   // LIVE MESSAGE SUBSCRIPTION
   useEffect(() => {
@@ -356,6 +419,29 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({
                   new Date(b.lastMessageAt).getTime() -
                   new Date(a.lastMessageAt).getTime()
               )
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${activeConversationId}`,
+        },
+        (payload) => {
+          const updated = payload.new as {
+            id: string;
+            is_read: boolean;
+          };
+
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === updated.id
+                ? { ...message, isRead: updated.is_read }
+                : message
+            )
           );
         }
       )
@@ -463,7 +549,6 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({
       setIsSending(false);
     }
   };
-
   return (
     <div className="flex flex-col w-full h-[calc(100dvh-8rem)] min-h-[480px] gap-4">
       {/* Page header */}
@@ -725,7 +810,18 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({
 
                           <span className="text-[10px] text-on-surface-variant/70 mt-1 px-1">
                             {formatMessageTime(message.createdAt)}
-                            {isMe ? ' · You' : ''}
+                            {isMe && (
+                              <>
+                                {' · '}
+                                {message.isRead ? (
+                                  <span className="text-primary font-semibold">
+                                    Seen ✓✓
+                                  </span>
+                                ) : (
+                                  'Sent ✓'
+                                )}
+                              </>
+                            )}
                           </span>
                         </div>
                       );
