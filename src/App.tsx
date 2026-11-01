@@ -12,7 +12,7 @@ import { PricingPage } from './pages/PricingPage';
 import { ContactPage } from './pages/ContactPage';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { TermsOfServicePage } from './pages/TermsOfServicePage';
-
+import AdminDashboardPage from './pages/AdminDashboardPage';
 // Auth Pages
 import { SignUpPage } from './pages/auth/SignUpPage';
 import { SignInPage } from './pages/auth/SignInPage';
