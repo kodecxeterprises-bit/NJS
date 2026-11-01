@@ -1,477 +1,548 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { BusinessProfile } from '../types';
+
+interface DiscoverBusiness {
+  id: string;
+  businessName: string;
+  businessType: string;
+  industry: string;
+  country: string;
+  city: string;
+  businessDescription: string;
+  products: unknown[];
+  services: unknown[];
+  capabilities: unknown[];
+  offers: unknown[];
+  needs: unknown[];
+  targetMarkets: unknown[];
+  isVerified: boolean;
+  createdAt: string;
+}
 
 interface DiscoverPageProps {
   onNavigate: (path: string, state?: any) => void;
 }
 
+interface Pagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+const EMPTY_PAGINATION: Pagination = {
+  page: 1,
+  pageSize: 12,
+  total: 0,
+  totalPages: 0,
+};
+
+function getItemLabel(item: unknown): string {
+  if (typeof item === 'string') return item;
+
+  if (item && typeof item === 'object') {
+    const value = item as Record<string, unknown>;
+    return String(value.name ?? value.title ?? value.label ?? value.category ?? '');
+  }
+
+  return '';
+}
+
+function getTags(items: unknown[], limit = 4): string[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map(getItemLabel)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function getInitials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('') || 'B';
+}
+
 export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
-  const { apiFetch, businessProfile } = useAuth();
+  const { apiFetch } = useAuth();
 
+  const [businesses, setBusinesses] = useState<DiscoverBusiness[]>([]);
+  const [pagination, setPagination] = useState<Pagination>(EMPTY_PAGINATION);
+
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [industryFilter, setIndustryFilter] = useState('All Industries');
-  const [locationFilter, setLocationFilter] = useState('Global');
-  const [typeFilter, setTypeFilter] = useState('All Types');
-  const [offeringFilter, setOfferingFilter] = useState('Any Offering');
-  const [companySizeFilter, setCompanySizeFilter] = useState('Any Size');
-  const [verificationFilter, setVerificationFilter] = useState('All Verified');
-  const [marketFilter, setMarketFilter] = useState('All Markets');
+  const [industry, setIndustry] = useState('');
+  const [businessType, setBusinessType] = useState('');
+  const [location, setLocation] = useState('');
+  const [offering, setOffering] = useState('');
+  const [verification, setVerification] = useState('');
 
-  const [businesses, setBusinesses] = useState<BusinessProfile[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const fetchBusinesses = async () => {
+  const fetchBusinesses = useCallback(async () => {
     setIsLoading(true);
-    try {
-      const queryParams = new URLSearchParams();
-      if (searchQuery) queryParams.set('query', searchQuery);
-      if (industryFilter !== 'All Industries') queryParams.set('industry', industryFilter);
-      if (locationFilter !== 'Global') queryParams.set('location', locationFilter);
-      if (typeFilter !== 'All Types') queryParams.set('type', typeFilter);
+    setError('');
 
-      const res = await apiFetch(`/api/business/all?${queryParams.toString()}`);
-      setBusinesses(res.businesses || []);
-    } catch (err) {
-      console.error('Failed to load businesses:', err);
+    try {
+      const params = new URLSearchParams();
+
+      if (searchQuery) params.set('query', searchQuery);
+      if (industry) params.set('industry', industry);
+      if (businessType) params.set('type', businessType);
+      if (location) params.set('location', location);
+      if (offering) params.set('offering', offering);
+      if (verification) params.set('verified', verification);
+
+      params.set('page', String(page));
+      params.set('pageSize', '12');
+
+      const response = await apiFetch(
+        `/api/business/discover?${params.toString()}`
+      );
+
+      setBusinesses(response.businesses ?? []);
+      setPagination(response.pagination ?? EMPTY_PAGINATION);
+    } catch (err: any) {
+      console.error('Business discovery failed:', err);
+      setError(err.message || 'We could not load businesses. Please try again.');
+      setBusinesses([]);
+      setPagination(EMPTY_PAGINATION);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [
+    apiFetch,
+    searchQuery,
+    industry,
+    businessType,
+    location,
+    offering,
+    verification,
+    page,
+  ]);
 
   useEffect(() => {
-    fetchBusinesses();
-  }, [industryFilter, locationFilter, typeFilter]);
+    void fetchBusinesses();
+  }, [fetchBusinesses]);
 
-  const handleConnect = async (business: BusinessProfile) => {
-    try {
-      await apiFetch('/api/connections/request', {
-        method: 'POST',
-        body: JSON.stringify({
-          targetBusinessId: business.id,
-          message: 'Hello, we discovered your profile on NJS and would like to explore mutual business opportunities.',
-        }),
-      });
-      setFeedback(`Connection request dispatched to ${business.businessName}!`);
-      setTimeout(() => setFeedback(null), 4000);
-    } catch (err: any) {
-      setFeedback(err.message || 'Unable to send connection request.');
-      setTimeout(() => setFeedback(null), 4000);
-    }
+  const resetFilters = () => {
+    setSearchInput('');
+    setSearchQuery('');
+    setIndustry('');
+    setBusinessType('');
+    setLocation('');
+    setOffering('');
+    setVerification('');
+    setPage(1);
   };
 
-  const handleSaveLead = async (business: BusinessProfile) => {
-    try {
-      await apiFetch('/api/leads/save', {
-        method: 'POST',
-        body: JSON.stringify({
-          companyName: business.businessName,
-          targetBusinessId: business.id,
-          industry: business.industry,
-          location: `${business.city ? business.city + ', ' : ''}${business.country}`,
-          domain: business.website,
-        }),
-      });
-      setFeedback(`Saved ${business.businessName} to Saved Leads.`);
-      setTimeout(() => setFeedback(null), 4000);
-    } catch (err: any) {
-      setFeedback(err.message || 'Unable to save lead.');
-      setTimeout(() => setFeedback(null), 4000);
-    }
+  const submitSearch = (event: React.FormEvent) => {
+    event.preventDefault();
+    setPage(1);
+    setSearchQuery(searchInput.trim());
   };
+
+  const hasFilters = Boolean(
+    searchQuery || industry || businessType || location || offering || verification
+  );
 
   return (
-    <div className="flex flex-col w-full">
-      {/* Top Section / Header Info */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+    <div className="flex flex-col w-full gap-7">
+      {/* Page heading */}
+      <section className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <span className="text-xs font-semibold uppercase tracking-widest text-primary mb-1 block">
-            Enterprise Directory
+          <span className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
+            NJS Business Network
           </span>
-          <h1 className="text-3xl sm:text-4xl font-bold text-on-surface">Discover Businesses</h1>
-          <p className="text-sm sm:text-base text-on-surface-variant mt-1">
-            Explore verified B2B partners, suppliers, and service providers tailored to your enterprise criteria.
+
+          <h1 className="text-3xl sm:text-4xl font-bold text-on-surface mt-2">
+            Discover Businesses
+          </h1>
+
+          <p className="text-sm sm:text-base text-on-surface-variant mt-2 max-w-2xl">
+            Find businesses, explore what they offer, and discover opportunities
+            to work together.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              setFeedback('Filter preset saved for your current enterprise search.');
-              setTimeout(() => setFeedback(null), 3000);
-            }}
-            className="bg-surface-container-high text-on-surface px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-surface-dim transition-colors flex items-center gap-2 cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[18px]">tune</span>
-            Saved Filters
-          </button>
-          <button
-            onClick={() => onNavigate('profile')}
-            className="bg-primary text-on-primary px-5 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-2 shadow-xs cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[18px]">add_business</span>
-            List Business
-          </button>
-        </div>
-      </div>
-
-      {feedback && (
-        <div className="mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-800 text-sm flex items-center gap-2 animate-in fade-in">
-          <span className="material-symbols-outlined text-[20px]">check_circle</span>
-          <span>{feedback}</span>
-        </div>
-      )}
-
-      {/* Search & Filter Bar Section */}
-      <div className="bg-surface-container-lowest rounded-2xl p-6 shadow-xs mb-8 transition-all border border-outline-variant/30">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            fetchBusinesses();
-          }}
-          className="relative flex items-center mb-6"
+        <button
+          type="button"
+          onClick={() => onNavigate('profile')}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-semibold hover:opacity-90 transition-opacity"
         >
-          <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[24px]">
-            search
-          </span>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search businesses, products or services..."
-            className="w-full bg-surface-container-low text-on-surface pl-12 pr-28 py-3.5 rounded-xl border-none outline-none focus:ring-2 focus:ring-primary text-sm sm:text-base placeholder:text-on-surface-variant/60 transition-all"
-          />
+          <span className="material-symbols-outlined text-lg">add_business</span>
+          List your business
+        </button>
+      </section>
+
+      {/* Search and filters */}
+      <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-4 sm:p-6 shadow-xs">
+        <form onSubmit={submitSearch} className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant">
+              search
+            </span>
+
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Search businesses, products, services..."
+              className="w-full rounded-xl bg-surface-container-low py-3.5 pl-12 pr-4 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
           <button
             type="submit"
-            className="absolute right-2 bg-primary text-on-primary px-5 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer"
+            className="rounded-xl bg-primary px-7 py-3.5 text-sm font-semibold text-on-primary hover:opacity-90 transition-opacity"
           >
             Search
           </button>
         </form>
 
-        {/* Robust Filters Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 pt-4 border-t border-outline-variant/20">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-on-surface-variant">
               Industry
-            </label>
-            <select
-              value={industryFilter}
-              onChange={(e) => setIndustryFilter(e.target.value)}
-              className="bg-surface-container-low text-on-surface text-xs sm:text-sm px-3 py-2 rounded-xl outline-none cursor-pointer hover:bg-surface-container transition-colors"
-            >
-              <option>All Industries</option>
-              <option>SaaS &amp; Tech</option>
-              <option>Manufacturing</option>
-              <option>Logistics</option>
-              <option>Fintech</option>
-              <option>Textiles &amp; Apparel</option>
-              <option>Packaging</option>
-            </select>
-          </div>
+            </span>
+            <input
+              value={industry}
+              onChange={(event) => {
+                setIndustry(event.target.value);
+                setPage(1);
+              }}
+              placeholder="e.g. Technology"
+              className="rounded-xl bg-surface-container-low px-3.5 py-3 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary"
+            />
+          </label>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-on-surface-variant">
+              Business type
+            </span>
+            <select
+              value={businessType}
+              onChange={(event) => {
+                setBusinessType(event.target.value);
+                setPage(1);
+              }}
+              className="rounded-xl bg-surface-container-low px-3.5 py-3 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">All business types</option>
+              <option value="Supplier">Supplier</option>
+              <option value="Manufacturer">Manufacturer</option>
+              <option value="Distributor">Distributor</option>
+              <option value="Retailer">Retailer</option>
+              <option value="Service Provider">Service Provider</option>
+              <option value="Wholesaler">Wholesaler</option>
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-on-surface-variant">
               Location
-            </label>
-            <select
-              value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
-              className="bg-surface-container-low text-on-surface text-xs sm:text-sm px-3 py-2 rounded-xl outline-none cursor-pointer hover:bg-surface-container transition-colors"
-            >
-              <option>Global</option>
-              <option>North America</option>
-              <option>Europe</option>
-              <option>Asia Pacific</option>
-            </select>
-          </div>
+            </span>
+            <input
+              value={location}
+              onChange={(event) => {
+                setLocation(event.target.value);
+                setPage(1);
+              }}
+              placeholder="City or country"
+              className="rounded-xl bg-surface-container-low px-3.5 py-3 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary"
+            />
+          </label>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
-              Business Type
-            </label>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="bg-surface-container-low text-on-surface text-xs sm:text-sm px-3 py-2 rounded-xl outline-none cursor-pointer hover:bg-surface-container transition-colors"
-            >
-              <option>All Types</option>
-              <option>Supplier</option>
-              <option>Manufacturer</option>
-              <option>Service Partner</option>
-              <option>Distributor</option>
-              <option>Retailer</option>
-            </select>
-          </div>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-on-surface-variant">
+              Products or services
+            </span>
+            <input
+              value={offering}
+              onChange={(event) => {
+                setOffering(event.target.value);
+                setPage(1);
+              }}
+              placeholder="What are you looking for?"
+              className="rounded-xl bg-surface-container-low px-3.5 py-3 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary"
+            />
+          </label>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
-              Products / Services
-            </label>
-            <select
-              value={offeringFilter}
-              onChange={(e) => setOfferingFilter(e.target.value)}
-              className="bg-surface-container-low text-on-surface text-xs sm:text-sm px-3 py-2 rounded-xl outline-none cursor-pointer hover:bg-surface-container transition-colors"
-            >
-              <option>Any Offering</option>
-              <option>API Integration</option>
-              <option>Raw Materials</option>
-              <option>Consulting</option>
-              <option>Custom Fabrication</option>
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
-              Company Size
-            </label>
-            <select
-              value={companySizeFilter}
-              onChange={(e) => setCompanySizeFilter(e.target.value)}
-              className="bg-surface-container-low text-on-surface text-xs sm:text-sm px-3 py-2 rounded-xl outline-none cursor-pointer hover:bg-surface-container transition-colors"
-            >
-              <option>Any Size</option>
-              <option>1-50 employees</option>
-              <option>51-250 employees</option>
-              <option>250+ employees</option>
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
+          <label className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-1">
+            <span className="text-xs font-semibold text-on-surface-variant">
               Verification
-            </label>
-            <select
-              value={verificationFilter}
-              onChange={(e) => setVerificationFilter(e.target.value)}
-              className="bg-surface-container-low text-on-surface text-xs sm:text-sm px-3 py-2 rounded-xl outline-none cursor-pointer hover:bg-surface-container transition-colors"
-            >
-              <option>All Verified</option>
-              <option>NJS Verified Only</option>
-              <option>Pending</option>
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
-              Operating Market
-            </label>
-            <select
-              value={marketFilter}
-              onChange={(e) => setMarketFilter(e.target.value)}
-              className="bg-surface-container-low text-on-surface text-xs sm:text-sm px-3 py-2 rounded-xl outline-none cursor-pointer hover:bg-surface-container transition-colors"
-            >
-              <option>All Markets</option>
-              <option>Enterprise B2B</option>
-              <option>SME / SMB</option>
-              <option>Public Sector</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content Area: Example Business Result & Empty/Live State */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
-        {/* Left Column / Showcase Card (Example Business Result Template) */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
-              <span className="text-xs font-bold uppercase tracking-wider text-primary">
-                Example business result template
-              </span>
-            </div>
-            <span className="text-xs text-on-surface-variant">Demonstrating structural layout</span>
-          </div>
-
-          <div className="bg-surface-container-lowest rounded-2xl p-6 sm:p-8 shadow-xs relative overflow-hidden group hover:shadow-md transition-all border border-outline-variant/30">
-            {/* Absolute badge */}
-            <div className="absolute top-6 right-6 flex items-center gap-1.5 bg-primary-fixed text-on-primary-fixed px-3 py-1 rounded-full text-xs font-semibold">
-              <span className="material-symbols-outlined text-[16px]">verified</span>
-              NJS Verified Enterprise
-            </div>
-
-            <div className="flex items-start gap-4 sm:gap-5 mb-6">
-              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-surface-container-high flex items-center justify-center text-primary font-bold text-xl sm:text-2xl shrink-0">
-                NX
-              </div>
-              <div>
-                <h3 className="text-xl sm:text-2xl font-bold text-on-surface flex items-center gap-2">
-                  Nexus Global Systems
-                  <span
-                    className="material-symbols-outlined text-primary text-[20px]"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    check_circle
-                  </span>
-                </h3>
-                <p className="text-xs sm:text-sm text-on-surface-variant mt-0.5">
-                  Enterprise Cloud Infrastructure &amp; AI Supply Chain Optimization
-                </p>
-                <div className="flex items-center gap-4 mt-3 text-xs text-on-surface-variant flex-wrap">
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px]">location_on</span>
-                    Frankfurt, Germany
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px]">group</span>
-                    250-500 employees
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px]">public</span>
-                    Global B2B
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <p className="text-sm text-on-surface/90 mb-6 leading-relaxed">
-              Leading provider of mission-critical cloud orchestrations and secure enterprise communication backbones. Specializing in high-throughput data pipelines and automated compliance frameworks for tier-one industrial partners.
-            </p>
-
-            {/* Tags / Offerings */}
-            <div className="flex flex-wrap gap-2 mb-6">
-              <span className="bg-surface-container-low text-on-surface-variant px-3 py-1 rounded-lg text-xs font-medium">
-                Cloud Architecture
-              </span>
-              <span className="bg-surface-container-low text-on-surface-variant px-3 py-1 rounded-lg text-xs font-medium">
-                Supply Chain AI
-              </span>
-              <span className="bg-surface-container-low text-on-surface-variant px-3 py-1 rounded-lg text-xs font-medium">
-                API Middleware
-              </span>
-              <span className="bg-surface-container-low text-on-surface-variant px-3 py-1 rounded-lg text-xs font-medium">
-                ISO-27001
-              </span>
-            </div>
-
-            {/* Card Footer Actions */}
-            <div className="flex items-center justify-between pt-6 border-t border-outline-variant/15 flex-wrap gap-3">
-              <div className="flex items-center gap-1.5 text-xs sm:text-sm text-primary font-semibold">
-                <span className="material-symbols-outlined text-[18px]">star</span>
-                4.9 (42 Enterprise Reviews)
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => {
-                    setFeedback('Nexus Global Systems is a verified reference template demonstrating complete NJS profile layout and compliance scores.');
-                    setTimeout(() => setFeedback(null), 4000);
-                  }}
-                  className="bg-surface-container-high text-on-surface px-4 py-2 rounded-xl text-xs sm:text-sm font-medium hover:bg-surface-dim transition-colors cursor-pointer"
-                >
-                  View Profile
-                </button>
-                <button
-                  onClick={() => {
-                    setFeedback('Direct connection requests can be sent to registered enterprise peers.');
-                    setTimeout(() => setFeedback(null), 4000);
-                  }}
-                  className="bg-primary text-on-primary px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
-                >
-                  Connect
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column / Live Search State Panel */}
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
-              Live Search State
             </span>
-            <span className="text-xs text-primary font-medium">
-              {businesses.length} active registered
-            </span>
-          </div>
-
-          <div className="bg-surface-container-lowest rounded-2xl p-6 sm:p-8 shadow-xs flex flex-col items-center justify-center text-center h-full min-h-[380px] border border-outline-variant/30">
-            {businesses.length === 0 ? (
-              <>
-                <div className="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center text-primary mb-4">
-                  <span className="material-symbols-outlined text-[32px]">search_off</span>
-                </div>
-                <h3 className="text-lg font-bold text-on-surface mb-2">
-                  No businesses found yet.
-                </h3>
-                <p className="text-xs sm:text-sm text-on-surface-variant max-w-xs mb-6 leading-relaxed">
-                  Adjust your filter parameters or initiate a targeted query to discover active enterprise partners.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIndustryFilter('All Industries');
-                    setLocationFilter('Global');
-                    setTypeFilter('All Types');
-                    setSearchQuery('');
-                    fetchBusinesses();
-                  }}
-                  className="bg-primary-container text-on-primary-container px-6 py-3 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-2 shadow-xs cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">bolt</span>
-                  Start a Search
-                </button>
-              </>
-            ) : (
-              <div className="w-full text-left space-y-4">
-                <h4 className="text-sm font-bold text-on-surface mb-2">
-                  Matching Registered Entities
-                </h4>
-                {businesses.map((biz) => (
-                  <div
-                    key={biz.id}
-                    className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/20 hover:border-primary transition-all flex items-center justify-between"
-                  >
-                    <div>
-                      <h5 className="font-bold text-sm text-on-surface">{biz.businessName}</h5>
-                      <p className="text-xs text-on-surface-variant">{biz.industry} • {biz.country}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleSaveLead(biz)}
-                        className="p-1.5 rounded-lg bg-surface-container hover:text-primary text-on-surface-variant"
-                        title="Save lead"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">bookmark</span>
-                      </button>
-                      <button
-                        onClick={() => handleConnect(biz)}
-                        className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:opacity-90"
-                      >
-                        Connect
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+            <select
+              value={verification}
+              onChange={(event) => {
+                setVerification(event.target.value);
+                setPage(1);
+              }}
+              className="rounded-xl bg-surface-container-low px-3.5 py-3 text-sm text-on-surface outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">All businesses</option>
+              <option value="verified">NJS verified</option>
+              <option value="pending">Not yet verified</option>
+            </select>
+          </label>
         </div>
-      </div>
 
-      {/* Additional Discover Prompt Section */}
-      <div className="bg-surface-container-low rounded-2xl p-6 sm:p-8 mb-12 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border border-outline-variant/30">
-        <div className="space-y-1.5">
-          <span className="text-xs font-bold uppercase tracking-wider text-primary">
-            AI Matching Engine
-          </span>
-          <h3 className="text-xl sm:text-2xl font-bold text-on-surface">
-            Looking for a bespoke supplier match?
-          </h3>
-          <p className="text-sm text-on-surface-variant max-w-xl leading-relaxed">
-            Let our AI analyze your requirements and automatically route RFPs to verified businesses meeting your precise scale and compliance needs.
+        {hasFilters && (
+          <div className="flex justify-end mt-4">
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="text-sm font-semibold text-primary hover:underline"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* Results heading */}
+      <section className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-on-surface">
+            Business directory
+          </h2>
+          <p className="text-sm text-on-surface-variant mt-1">
+            {isLoading
+              ? 'Finding businesses...'
+              : `${pagination.total} ${pagination.total === 1 ? 'business' : 'businesses'} found`}
           </p>
         </div>
+
         <button
-          onClick={() => onNavigate('ai-matches')}
-          className="bg-primary text-on-primary px-6 py-3 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity shrink-0 flex items-center gap-2 cursor-pointer shadow-xs"
+          type="button"
+          onClick={() => void fetchBusinesses()}
+          disabled={isLoading}
+          className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/40 px-4 py-2.5 text-sm font-medium text-on-surface hover:bg-surface-container-low disabled:opacity-50"
         >
-          <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
-          Launch AI Matchmaker
+          <span className="material-symbols-outlined text-lg">refresh</span>
+          Refresh
         </button>
-      </div>
-    </div>
-  );
-};
+      </section>
+
+      {/* Loading state */}
+      {isLoading && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((item) => (
+            <div
+              key={item}
+              className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-6 animate-pulse"
+            >
+              <div className="flex gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-surface-container-high" />
+                <div className="flex-1 space-y-3">
+                  <div className="h-4 w-2/3 rounded bg-surface-container-high" />
+                  <div className="h-3 w-1/3 rounded bg-surface-container-high" />
+                </div>
+              </div>
+              <div className="h-3 w-full rounded bg-surface-container-high mt-6" />
+              <div className="h-3 w-4/5 rounded bg-surface-container-high mt-3" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error state */}
+      {!isLoading && error && (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-7 text-center">
+          <span className="material-symbols-outlined text-3xl text-red-500">
+            cloud_off
+          </span>
+          <h3 className="text-lg font-bold text-on-surface mt-3">
+            Couldn't load the directory
+          </h3>
+          <p className="text-sm text-on-surface-variant mt-2">{error}</p>
+          <button
+            type="button"
+            onClick={() => void fetchBusinesses()}
+            className="mt-5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      {/* Real business results */}
+      {!isLoading && !error && businesses.length > 0 && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {businesses.map((business) => {
+            const tags = getTags(
+              [
+                ...business.offers,
+                ...business.products,
+                ...business.services,
+                ...business.capabilities,
+              ],
+              5
+            );
+
+            return (
+              <article
+                key={business.id}
+                className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-5 sm:p-6 shadow-xs hover:shadow-md hover:border-primary/40 transition-all"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 shrink-0 rounded-2xl bg-primary-container text-on-primary-container flex items-center justify-center text-lg font-bold">
+                    {getInitials(business.businessName)}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-bold text-on-surface break-words">
+                        {business.businessName}
+                      </h3>
+
+                      {business.isVerified && (
+                        <span
+                          title="NJS verified business"
+                          className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary"
+                        >
+                          <span className="material-symbols-outlined text-sm">
+                            verified
+                          </span>
+                          Verified
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-sm text-on-surface-variant mt-1">
+                      {business.businessType}
+                      {business.industry ? ` · ${business.industry}` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-5 text-xs text-on-surface-variant">
+                  {(business.city || business.country) && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-base">
+                        location_on
+                      </span>
+                      {[business.city, business.country].filter(Boolean).join(', ')}
+                    </span>
+                  )}
+
+                  {business.industry && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-base">
+                        business
+                      </span>
+                      {business.industry}
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-sm text-on-surface-variant leading-relaxed mt-5">
+                  {business.businessDescription ||
+                    'This business has not added a description yet.'}
+                </p>
+
+                {tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-5">
+                    {tags.map((tag, index) => (
+                      <span
+                        key={`${business.id}-${index}`}
+                        className="rounded-lg bg-surface-container-low px-3 py-1.5 text-xs font-medium text-on-surface-variant"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-3 mt-6 pt-5 border-t border-outline-variant/20">
+                  <span className="text-xs text-on-surface-variant">
+                    Registered on NJS
+                  </span>
+
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-surface-container-low px-3 py-2 text-xs font-semibold text-on-surface-variant"
+                    title="Business connections are coming soon"
+                  >
+                    <span className="material-symbols-outlined text-base">
+                      handshake
+                    </span>
+                    Connect soon
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && !error && businesses.length === 0 && (
+        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-6 py-14 text-center">
+          <div className="mx-auto w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+            <span className="material-symbols-outlined text-3xl">
+              travel_explore
+            </span>
+          </div>
+
+          <h3 className="text-xl font-bold text-on-surface mt-5">
+            {hasFilters ? 'No matching businesses' : 'Your network is growing'}
+          </h3>
+
+          <p className="text-sm text-on-surface-variant max-w-md mx-auto mt-2">
+            {hasFilters
+              ? 'Try changing your search or clearing some filters to see more businesses.'
+              : 'There are no other completed business profiles to display just yet. Check back as more businesses join NJS.'}
+          </p>
+
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="mt-5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {!isLoading && !error && pagination.totalPages > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant/20 pt-5">
+          <p className="text-sm text-on-surface-variant">
+            Page {pagination.page} of {pagination.totalPages}
+          </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              className="rounded-xl border border-outline-variant/40 px-4 py-2 text-sm font-semibold text-on-surface disabled:opacity-40"
+            >
+              Previous
+            </button>
+
+            <button
+              type="button"
+              disabled={page >= pagination.totalPages}
+              onClick={() => setPage((current) => current + 1)}
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* AI feature preview */}
+      <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+        <div>
+          
