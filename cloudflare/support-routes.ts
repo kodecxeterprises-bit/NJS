@@ -69,15 +69,20 @@ async function requireAdmin(request: Request, env: SupportEnv) {
   }
 
   if (data.user.app_metadata?.role !== "admin") {
-    return { error: "Administrator access required.", status: 403 as const };
+    return {
+      error: "Administrator access required.",
+      status: 403 as const,
+    };
   }
 
   return { supabase, user: data.user };
 }
 
 /**
- * PUBLIC: Create a support ticket.
+ * PUBLIC: Create an anonymous support ticket.
  * POST /api/support/tickets
+ *
+ * No login, name, email, or company is required.
  */
 export async function handleCreateSupportTicket(
   request: Request,
@@ -95,41 +100,41 @@ export async function handleCreateSupportTicket(
     return json({ error: "Invalid request body." }, 400);
   }
 
-  const name = String(body?.name ?? "").trim().slice(0, 120);
-  const email = String(body?.email ?? "").trim().toLowerCase().slice(0, 254);
-  const company = String(body?.company ?? "").trim().slice(0, 160);
   const subject = String(body?.subject ?? "").trim().slice(0, 180);
+  const message = String(body?.message ?? "").trim().slice(0, 5000);
+
   const requestedCategory = String(body?.category ?? "general")
     .trim()
     .toLowerCase();
 
-  const category = (VALID_CATEGORIES as readonly string[]).includes(
-    requestedCategory
-  )
+  const category = (
+    VALID_CATEGORIES as readonly string[]
+  ).includes(requestedCategory)
     ? requestedCategory
     : "general";
 
-  const message = String(body?.message ?? "").trim().slice(0, 5000);
-
-  if (name.length < 2 || !email || subject.length < 3 || message.length < 10) {
+  if (subject.length < 3) {
     return json({
-      error:
-        "Please provide your name, a valid email, a subject of at least 3 characters and a message of at least 10 characters.",
+      error: "Please enter a subject of at least 3 characters.",
     }, 400);
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return json({ error: "Please enter a valid email address." }, 400);
+  if (message.length < 10) {
+    return json({
+      error: "Please describe your issue using at least 10 characters.",
+    }, 400);
   }
 
   const supabase = getDatabase(env);
 
+  // Anonymous submissions use a neutral display name.
+  // Email and company are deliberately left empty.
   const { data: ticket, error: ticketError } = await supabase
     .from("support_tickets")
     .insert({
-      requester_name: name,
-      requester_email: email,
-      company: company || null,
+      requester_name: "Website visitor",
+      requester_email: null,
+      company: null,
       subject,
       category,
       priority: "normal",
@@ -139,8 +144,14 @@ export async function handleCreateSupportTicket(
     .single();
 
   if (ticketError || !ticket) {
-    console.error("Support ticket creation failed:", ticketError?.message);
-    return json({ error: "Could not create your ticket. Please try again." }, 500);
+    console.error(
+      "Support ticket creation failed:",
+      ticketError?.message
+    );
+
+    return json({
+      error: "Could not create your ticket. Please try again.",
+    }, 500);
   }
 
   const { error: replyError } = await supabase
@@ -148,27 +159,41 @@ export async function handleCreateSupportTicket(
     .insert({
       ticket_id: ticket.id,
       sender_id: null,
-      sender_name: name,
-      sender_email: email,
+      sender_name: "Website visitor",
+      sender_email: null,
       is_admin: false,
       message,
     });
 
   if (replyError) {
-    console.error("Initial support message failed:", replyError.message);
-    await supabase.from("support_tickets").delete().eq("id", ticket.id);
+    console.error(
+      "Initial support message failed:",
+      replyError.message
+    );
+
+    await supabase
+      .from("support_tickets")
+      .delete()
+      .eq("id", ticket.id);
 
     return json({
       error: "Your message could not be saved. Please try again.",
     }, 500);
   }
 
-  await supabase
+  const { error: timestampError } = await supabase
     .from("support_tickets")
     .update({
       last_reply_at: new Date().toISOString(),
     })
     .eq("id", ticket.id);
+
+  if (timestampError) {
+    console.error(
+      "Ticket timestamp update failed:",
+      timestampError.message
+    );
+  }
 
   return json({
     success: true,
@@ -191,6 +216,7 @@ export async function handleAdminSupportGet(
   }
 
   const auth = await requireAdmin(request, env);
+
   if ("error" in auth) {
     return json({ error: auth.error }, auth.status);
   }
@@ -199,11 +225,15 @@ export async function handleAdminSupportGet(
   const ticketId = url.searchParams.get("ticketId");
   const status = url.searchParams.get("status");
 
-  if (status && status !== "all" &&
-      !(VALID_STATUSES as readonly string[]).includes(status)) {
+  if (
+    status &&
+    status !== "all" &&
+    !(VALID_STATUSES as readonly string[]).includes(status)
+  ) {
     return json({ error: "Invalid ticket status filter." }, 400);
   }
 
+  // Load one ticket and its conversation.
   if (ticketId) {
     const { data: ticket, error } = await auth.supabase
       .from("support_tickets")
@@ -222,10 +252,13 @@ export async function handleAdminSupportGet(
       .order("created_at", { ascending: true });
 
     if (repliesError) {
-      return json({ error: "Could not load ticket replies." }, 500);
+      return json({
+        error: "Could not load ticket replies.",
+      }, 500);
     }
 
     const conversation = replies ?? [];
+
     const originalMessage = conversation.find(
       (reply) => !reply.is_admin
     );
@@ -240,10 +273,14 @@ export async function handleAdminSupportGet(
     });
   }
 
+  // Load the support inbox.
   let query = auth.supabase
     .from("support_tickets")
     .select("*")
-    .order("last_reply_at", { ascending: false, nullsFirst: false })
+    .order("last_reply_at", {
+      ascending: false,
+      nullsFirst: false,
+    })
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -255,7 +292,10 @@ export async function handleAdminSupportGet(
 
   if (error) {
     console.error("Support inbox query failed:", error.message);
-    return json({ error: "Could not load the support inbox." }, 500);
+
+    return json({
+      error: "Could not load the support inbox.",
+    }, 500);
   }
 
   return json({
@@ -278,6 +318,7 @@ export async function handleAdminSupportPost(
   }
 
   const auth = await requireAdmin(request, env);
+
   if ("error" in auth) {
     return json({ error: auth.error }, auth.status);
   }
@@ -306,7 +347,7 @@ export async function handleAdminSupportPost(
     return json({ error: "Ticket not found." }, 404);
   }
 
-  // Send an administrator reply.
+  // Administrator reply.
   if (body.action === "reply") {
     const message = String(body.message ?? "").trim();
 
@@ -316,16 +357,18 @@ export async function handleAdminSupportPost(
       }, 400);
     }
 
+    const adminName =
+      auth.user.user_metadata?.full_name ||
+      auth.user.user_metadata?.name ||
+      auth.user.email ||
+      "NJS Support";
+
     const { data: reply, error: replyError } = await auth.supabase
       .from("support_replies")
       .insert({
         ticket_id: ticketId,
         sender_id: auth.user.id,
-        sender_name:
-          auth.user.user_metadata?.full_name ||
-          auth.user.user_metadata?.name ||
-          auth.user.email ||
-          "NJS Support",
+        sender_name: adminName,
         sender_email: auth.user.email ?? null,
         is_admin: true,
         message,
@@ -334,8 +377,14 @@ export async function handleAdminSupportPost(
       .single();
 
     if (replyError) {
-      console.error("Admin support reply failed:", replyError.message);
-      return json({ error: "Could not send your reply." }, 500);
+      console.error(
+        "Admin support reply failed:",
+        replyError.message
+      );
+
+      return json({
+        error: "Could not send your reply.",
+      }, 500);
     }
 
     const { error: updateError } = await auth.supabase
@@ -347,7 +396,10 @@ export async function handleAdminSupportPost(
       .eq("id", ticketId);
 
     if (updateError) {
-      console.error("Ticket timestamp update failed:", updateError.message);
+      console.error(
+        "Ticket timestamp update failed:",
+        updateError.message
+      );
     }
 
     return json({
@@ -397,7 +449,10 @@ export async function handleAdminSupportPost(
 
   if (updateError) {
     console.error("Ticket update failed:", updateError.message);
-    return json({ error: "Could not update the ticket." }, 500);
+
+    return json({
+      error: "Could not update the ticket.",
+    }, 500);
   }
 
   return json({
