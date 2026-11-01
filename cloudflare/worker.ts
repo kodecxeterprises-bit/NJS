@@ -820,6 +820,36 @@ export default {
       if (url.pathname === "/api/support/tickets") {
         return await handleCreateSupportTicket(request, env);
       }
+      // Admin dashboard overview
+      if (url.pathname === "/api/admin/overview") {
+        return await handleAdminOverview(request, env);
+      }
+
+      // Admin user management
+      if (url.pathname === "/api/admin/users") {
+        if (request.method === "GET") {
+          return await handleAdminUsersGet(request, env);
+        }
+
+        if (request.method === "POST") {
+          return await handleAdminUsersPost(request, env);
+        }
+
+        return json({ error: "Method not allowed." }, 405);
+      }
+
+      // Admin business management
+      if (url.pathname === "/api/admin/businesses") {
+        if (request.method === "GET") {
+          return await handleAdminBusinessesGet(request, env);
+        }
+
+        if (request.method === "POST") {
+          return await handleAdminBusinessesPost(request, env);
+        }
+
+        return json({ error: "Method not allowed." }, 405);
+      }
 
       // Admin support inbox
       if (url.pathname === "/api/admin/support") {
