@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 
 interface ContactPageProps {
@@ -8,120 +9,241 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [company, setCompany] = useState('');
+  const [subject, setSubject] = useState('');
+  const [category, setCategory] = useState('General Support');
   const [message, setMessage] = useState('');
-  const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [ticketNumber, setTicketNumber] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitted(true);
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/support/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          email,
+          company,
+          subject,
+          category,
+          message,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Your support request could not be submitted.');
+      }
+
+      setTicketNumber(data.ticketNumber);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Something went wrong. Please try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="bg-surface text-on-surface min-h-screen flex flex-col font-sans">
+    <div className="min-h-screen bg-surface text-on-surface flex flex-col">
       <header className="sticky top-0 z-40 bg-surface/90 backdrop-blur-xl border-b border-outline-variant/30 px-6 lg:px-16 py-4 flex items-center justify-between">
-        <div onClick={() => onNavigate('landing')} className="flex items-center gap-2 cursor-pointer select-none">
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary font-bold text-lg">
+        <button
+          onClick={() => onNavigate('landing')}
+          className="flex items-center gap-2"
+        >
+          <span className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary font-bold">
             NJS
-          </div>
-          <span className="text-xl font-bold tracking-tight text-on-surface">NJS Platform</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={() => onNavigate('sign-in')} className="text-sm font-medium hover:text-primary">
+          </span>
+          <span className="text-xl font-bold">NJS Platform</span>
+        </button>
+
+        <div className="flex items-center gap-4">
+          <button onClick={() => onNavigate('sign-in')} className="text-sm font-medium">
             Sign In
           </button>
-          <button onClick={() => onNavigate('sign-up')} className="px-5 py-2.5 rounded-xl bg-primary-container text-on-primary-container text-sm font-semibold hover:opacity-90 shadow-xs">
+          <button
+            onClick={() => onNavigate('sign-up')}
+            className="px-5 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-semibold"
+          >
             Get Started
           </button>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 py-16 flex-1 my-auto">
-        <div className="bg-surface-container-lowest rounded-3xl p-8 sm:p-12 border border-outline-variant/30 shadow-xl">
-          <div className="text-center max-w-lg mx-auto mb-8">
-            <span className="text-xs font-bold uppercase tracking-widest text-primary">Enterprise Inquiries</span>
-            <h1 className="text-3xl font-bold text-on-surface mt-2">Get in touch with NJS</h1>
-            <p className="text-sm text-on-surface-variant mt-1">
-              Have questions about neural matchmaking or enterprise custom deployments? Reach out to our engineering team.
-            </p>
-          </div>
+      <main className="flex-1 w-full max-w-3xl mx-auto px-5 py-12 sm:py-16">
+        <div className="text-center mb-9">
+          <span className="text-xs font-bold uppercase tracking-widest text-primary">
+            NJS Support Centre
+          </span>
+          <h1 className="text-3xl sm:text-4xl font-bold mt-3">
+            How can we help?
+          </h1>
+          <p className="text-sm text-on-surface-variant mt-3 max-w-xl mx-auto">
+            Send our support team a message. We'll create a ticket so your
+            request can be tracked and followed up.
+          </p>
+        </div>
 
-          {submitted ? (
-            <div className="p-8 rounded-2xl bg-green-500/10 border border-green-500/30 text-center space-y-3">
-              <span className="material-symbols-outlined text-4xl text-green-700">check_circle</span>
-              <h2 className="text-xl font-bold text-green-800">Message Received</h2>
-              <p className="text-sm text-green-700 leading-relaxed">
-                Thank you for contacting NJS Platform. An enterprise specialist will follow up with you within one business day.
+        <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/30 shadow-xl p-6 sm:p-10">
+          {ticketNumber ? (
+            <div className="text-center py-8 space-y-4">
+              <div className="w-16 h-16 rounded-full bg-green-500/10 text-green-600 flex items-center justify-center mx-auto">
+                <span className="material-symbols-outlined text-4xl">
+                  check_circle
+                </span>
+              </div>
+              <h2 className="text-2xl font-bold">Ticket submitted!</h2>
+              <p className="text-sm text-on-surface-variant">
+                Your request has been received by the NJS support team.
               </p>
+              <div className="bg-surface-container-low rounded-2xl p-5">
+                <p className="text-xs text-on-surface-variant mb-2">
+                  YOUR SUPPORT TICKET NUMBER
+                </p>
+                <p className="text-2xl font-bold text-primary tracking-wider">
+                  {ticketNumber}
+                </p>
+                <p className="text-xs text-on-surface-variant mt-2">
+                  Keep this number for future reference.
+                </p>
+              </div>
               <button
-                onClick={() => setSubmitted(false)}
-                className="mt-4 px-6 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-semibold"
+                onClick={() => onNavigate('landing')}
+                className="px-6 py-3 rounded-xl bg-primary text-on-primary font-semibold text-sm"
               >
-                Send Another Note
+                Back to Home
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-on-surface mb-1">Your Name *</label>
+                  <label className="block text-xs font-semibold mb-2">
+                    Full name *
+                  </label>
                   <input
-                    type="text"
+                    required
+                    maxLength={120}
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    placeholder="Alex Morgan"
-                    className="w-full px-4 py-2.5 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm text-on-surface"
+                    onChange={e => setName(e.target.value)}
+                    placeholder="Your name"
+                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs font-semibold text-on-surface mb-1">Business Email *</label>
+                  <label className="block text-xs font-semibold mb-2">
+                    Email address *
+                  </label>
                   <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
                     required
-                    placeholder="alex@company.com"
-                    className="w-full px-4 py-2.5 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm text-on-surface"
+                    type="email"
+                    maxLength={254}
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-on-surface mb-1">Company / Organization</label>
+                <label className="block text-xs font-semibold mb-2">
+                  Company / Organisation
+                </label>
                 <input
-                  type="text"
+                  maxLength={160}
                   value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="Acme Industrial Ltd."
-                  className="w-full px-4 py-2.5 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm text-on-surface"
+                  onChange={e => setCompany(e.target.value)}
+                  placeholder="Your company name"
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-on-surface mb-1">How can we assist? *</label>
-                <textarea
-                  rows={4}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  required
-                  placeholder="Tell us about your sourcing objectives or enterprise requirements..."
-                  className="w-full p-4 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm text-on-surface resize-none leading-relaxed"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold mb-2">
+                    Support category *
+                  </label>
+                  <select
+                    value={category}
+                    onChange={e => setCategory(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant outline-none text-sm"
+                  >
+                    <option>General Support</option>
+                    <option>Account & Login</option>
+                    <option>Business Profile</option>
+                    <option>Discover & Matchmaking</option>
+                    <option>Messages & Connections</option>
+                    <option>Billing & Subscription</option>
+                    <option>Report a Problem</option>
+                    <option>Enterprise Inquiry</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold mb-2">
+                    Subject *
+                  </label>
+                  <input
+                    required
+                    maxLength={180}
+                    value={subject}
+                    onChange={e => setSubject(e.target.value)}
+                    placeholder="What do you need help with?"
+                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
+                  />
+                </div>
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-2">
+                  Describe your issue *
+                </label>
+                <textarea
+                  required
+                  minLength={10}
+                  maxLength={5000}
+                  rows={6}
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                  placeholder="Tell us what happened and how we can help..."
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm resize-y"
+                />
+                <p className="text-xs text-on-surface-variant mt-2">
+                  Please don't include passwords or sensitive payment details.
+                </p>
+              </div>
+
+              {error && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-600 p-3 text-sm">
+                  {error}
+                </div>
+              )}
 
               <button
                 type="submit"
-                className="w-full py-3.5 rounded-xl bg-primary text-on-primary font-bold text-sm shadow-md hover:opacity-90 transition-opacity cursor-pointer"
+                disabled={loading}
+                className="w-full py-3.5 rounded-xl bg-primary text-on-primary font-bold text-sm shadow-md hover:opacity-90 disabled:opacity-50"
               >
-                Send Message
+                {loading ? 'Submitting ticket...' : 'Submit Support Ticket'}
               </button>
             </form>
           )}
         </div>
       </main>
 
-      <footer className="bg-surface-container-low py-8 px-6 text-center text-xs text-on-surface-variant border-t border-outline-variant/30">
-        © 2025 NJS Platform. All rights reserved.
+      <footer className="border-t border-outline-variant/30 py-6 text-center text-xs text-on-surface-variant">
+        © 2026 NJS Platform. All rights reserved.
       </footer>
     </div>
   );
