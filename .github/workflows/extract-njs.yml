@@ -1,3 +1,22 @@
+
+name: Extract NJS Project
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
       - name: Extract NJS messaging updates
         run: |
           ZIP="njs-messaging-updated-files.zip"
@@ -20,3 +39,18 @@
 
           echo "Messaging files extracted successfully."
           ls -l src/pages/MessagesPage.tsx src/types/index.ts
+
+      - name: Commit extracted files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add src/pages/MessagesPage.tsx src/types/index.ts
+          git add -u
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update NJS messaging features"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
