@@ -64,6 +64,8 @@ async function authenticate(request: Request, env: Env) {
 function mapBusiness(business: any) {
   if (!business) return null;
 
+  // This mapping is for the authenticated owner's own profile.
+  // Never use it for public business discovery.
   return {
     id: business.id,
     userId: business.owner_id,
@@ -93,6 +95,48 @@ function mapBusiness(business: any) {
     createdAt: business.created_at,
     updatedAt: business.updated_at,
   };
+}
+
+function mapDiscoverBusiness(business: any) {
+  // Explicit public projection. Do not add owner_id, phone, email,
+  // private profile fields, or account information here.
+  return {
+    id: business.id,
+    businessName: business.business_name ?? "",
+    businessType: business.business_type ?? "",
+    industry: business.industry ?? "",
+    country: business.country ?? "",
+    city: business.city ?? "",
+    businessDescription: business.business_description ?? "",
+    products: business.products ?? [],
+    services: business.services ?? [],
+    capabilities: business.capabilities ?? [],
+    offers: business.offers ?? [],
+    needs: business.needs ?? [],
+    targetMarkets: business.target_markets ?? [],
+    isVerified: business.is_verified === true,
+    createdAt: business.created_at,
+  };
+}
+
+function searchableText(value: unknown): string {
+  if (value == null) return "";
+
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(searchableText).join(" ");
+  }
+
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>)
+      .map(searchableText)
+      .join(" ");
+  }
+
+  return "";
 }
 
 async function handleAuthMe(request: Request, env: Env) {
@@ -249,7 +293,6 @@ async function handleBusinessSave(request: Request, env: Env) {
     updated_at: now,
   };
 
-  // Update an existing business belonging to this authenticated user.
   const { data: existing, error: lookupError } = await supabase
     .from("business_profiles")
     .select("id")
@@ -297,6 +340,132 @@ async function handleBusinessSave(request: Request, env: Env) {
   });
 }
 
+async function handleBusinessDiscover(request: Request, env: Env) {
+  if (request.method !== "GET") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const auth = await authenticate(request, env);
+
+  if ("error" in auth) {
+    return json({ error: auth.error }, auth.status);
+  }
+
+  const { supabase, user } = auth;
+  const url = new URL(request.url);
+
+  const search = (url.searchParams.get("query") ?? url.searchParams.get("search") ?? "")
+    .trim()
+    .toLowerCase()
+    .slice(0, 100);
+
+  const industry = (url.searchParams.get("industry") ?? "").trim().toLowerCase();
+  const type = (url.searchParams.get("type") ?? "").trim().toLowerCase();
+  const location = (url.searchParams.get("location") ?? "").trim().toLowerCase();
+  const offering = (url.searchParams.get("offering") ?? "").trim().toLowerCase();
+  const verification = (url.searchParams.get("verified") ?? "").trim().toLowerCase();
+  const market = (url.searchParams.get("market") ?? "").trim().toLowerCase();
+
+  const page = Math.max(1, Math.min(10000, Number(url.searchParams.get("page")) || 1));
+  const pageSize = Math.max(1, Math.min(50, Number(url.searchParams.get("pageSize")) || 12));
+
+  // Fetch only completed profiles, exclude the signed-in user's own
+  // business, and select only the fields needed by the public directory.
+  const { data, error } = await supabase
+    .from("business_profiles")
+    .select(
+      "id, business_name, business_type, industry, country, city, business_description, products, services, capabilities, offers, needs, target_markets, is_verified, created_at"
+    )
+    .eq("onboarding_completed", true)
+    .neq("owner_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.error("Business discovery query failed:", error.message);
+    return json({ error: "Could not load businesses right now." }, 500);
+  }
+
+  let businesses = (data ?? []).map(mapDiscoverBusiness);
+
+  if (search) {
+    businesses = businesses.filter((business: any) => {
+      const haystack = searchableText([
+        business.businessName,
+        business.businessType,
+        business.industry,
+        business.country,
+        business.city,
+        business.businessDescription,
+        business.products,
+        business.services,
+        business.capabilities,
+        business.offers,
+        business.needs,
+        business.targetMarkets,
+      ]).toLowerCase();
+
+      return haystack.includes(search);
+    });
+  }
+
+  if (industry) {
+    businesses = businesses.filter((business: any) =>
+      business.industry.toLowerCase().includes(industry)
+    );
+  }
+
+  if (type) {
+    businesses = businesses.filter((business: any) =>
+      business.businessType.toLowerCase().includes(type)
+    );
+  }
+
+  if (location && location !== "global") {
+    businesses = businesses.filter((business: any) =>
+      `${business.city} ${business.country}`.toLowerCase().includes(location)
+    );
+  }
+
+  if (offering) {
+    businesses = businesses.filter((business: any) =>
+      searchableText([
+        business.products,
+        business.services,
+        business.capabilities,
+        business.offers,
+      ]).toLowerCase().includes(offering)
+    );
+  }
+
+  if (verification === "verified" || verification === "njs verified only") {
+    businesses = businesses.filter((business: any) => business.isVerified);
+  } else if (verification === "pending") {
+    businesses = businesses.filter((business: any) => !business.isVerified);
+  }
+
+  if (market && market !== "all markets") {
+    businesses = businesses.filter((business: any) =>
+      searchableText(business.targetMarkets).toLowerCase().includes(market)
+    );
+  }
+
+  const total = businesses.length;
+  const start = (page - 1) * pageSize;
+  const pagedBusinesses = businesses.slice(start, start + pageSize);
+
+  return json({
+    success: true,
+    businesses: pagedBusinesses,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -312,6 +481,10 @@ export default {
 
       if (url.pathname === "/api/business/save") {
         return await handleBusinessSave(request, env);
+      }
+
+      if (url.pathname === "/api/business/discover") {
+        return await handleBusinessDiscover(request, env);
       }
 
       if (url.pathname.startsWith("/api/")) {
