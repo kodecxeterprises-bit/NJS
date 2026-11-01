@@ -6,17 +6,14 @@ interface ContactPageProps {
 }
 
 export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [company, setCompany] = useState('');
   const [subject, setSubject] = useState('');
-  const [category, setCategory] = useState('General Support');
+  const [category, setCategory] = useState('general');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [ticketNumber, setTicketNumber] = useState('');
 
-  const handleSubmit = async (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
     setLoading(true);
@@ -26,19 +23,18 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
-          email,
-          company,
-          subject,
+          subject: subject.trim(),
           category,
-          message,
+          message: message.trim(),
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Your support request could not be submitted.');
+        throw new Error(
+          data.error || 'Your support request could not be submitted.'
+        );
       }
 
       setTicketNumber(data.ticketNumber);
@@ -55,7 +51,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
 
   return (
     <div className="min-h-screen bg-surface text-on-surface flex flex-col">
-      <header className="sticky top-0 z-40 bg-surface/90 backdrop-blur-xl border-b border-outline-variant/30 px-6 lg:px-16 py-4 flex items-center justify-between">
+      <header className="sticky top-0 z-40 bg-surface/90 backdrop-blur-xl border-b border-outline-variant/30 px-6 lg:px-16 py-4">
         <button
           onClick={() => onNavigate('landing')}
           className="flex items-center gap-2"
@@ -65,18 +61,6 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
           </span>
           <span className="text-xl font-bold">NJS Platform</span>
         </button>
-
-        <div className="flex items-center gap-4">
-          <button onClick={() => onNavigate('sign-in')} className="text-sm font-medium">
-            Sign In
-          </button>
-          <button
-            onClick={() => onNavigate('sign-up')}
-            className="px-5 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-semibold"
-          >
-            Get Started
-          </button>
-        </div>
       </header>
 
       <main className="flex-1 w-full max-w-3xl mx-auto px-5 py-12 sm:py-16">
@@ -84,12 +68,14 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
           <span className="text-xs font-bold uppercase tracking-widest text-primary">
             NJS Support Centre
           </span>
+
           <h1 className="text-3xl sm:text-4xl font-bold mt-3">
             How can we help?
           </h1>
+
           <p className="text-sm text-on-surface-variant mt-3 max-w-xl mx-auto">
-            Send our support team a message. We'll create a ticket so your
-            request can be tracked and followed up.
+            Tell us what you need help with. Our support team will receive
+            your request and create a ticket that can be tracked.
           </p>
         </div>
 
@@ -101,21 +87,27 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                   check_circle
                 </span>
               </div>
+
               <h2 className="text-2xl font-bold">Ticket submitted!</h2>
+
               <p className="text-sm text-on-surface-variant">
                 Your request has been received by the NJS support team.
               </p>
+
               <div className="bg-surface-container-low rounded-2xl p-5">
                 <p className="text-xs text-on-surface-variant mb-2">
                   YOUR SUPPORT TICKET NUMBER
                 </p>
+
                 <p className="text-2xl font-bold text-primary tracking-wider">
                   {ticketNumber}
                 </p>
+
                 <p className="text-xs text-on-surface-variant mt-2">
                   Keep this number for future reference.
                 </p>
               </div>
+
               <button
                 onClick={() => onNavigate('landing')}
                 className="px-6 py-3 rounded-xl bg-primary text-on-primary font-semibold text-sm"
@@ -125,107 +117,69 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold mb-2">
-                    Full name *
-                  </label>
-                  <input
-                    required
-                    maxLength={120}
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder="Your name"
-                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-semibold mb-2">
+                  Support category *
+                </label>
 
-                <div>
-                  <label className="block text-xs font-semibold mb-2">
-                    Email address *
-                  </label>
-                  <input
-                    required
-                    type="email"
-                    maxLength={254}
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
-                  />
-                </div>
+                <select
+                  required
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant outline-none text-sm focus:border-primary"
+                >
+                  <option value="general">General Support</option>
+                  <option value="account">Account & Login</option>
+                  <option value="business_profile">Business Profile</option>
+                  <option value="connections">Discover & Matchmaking</option>
+                  <option value="messaging">Messages & Connections</option>
+                  <option value="billing">Billing & Subscription</option>
+                  <option value="bug_report">Report a Problem</option>
+                  <option value="other">Other Inquiry</option>
+                </select>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold mb-2">
-                  Company / Organisation
+                  Subject *
                 </label>
+
                 <input
-                  maxLength={160}
-                  value={company}
-                  onChange={e => setCompany(e.target.value)}
-                  placeholder="Your company name"
+                  required
+                  maxLength={180}
+                  value={subject}
+                  onChange={e => setSubject(e.target.value)}
+                  placeholder="What do you need help with?"
                   className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
                 />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold mb-2">
-                    Support category *
-                  </label>
-                  <select
-                    value={category}
-                    onChange={e => setCategory(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant outline-none text-sm"
-                  >
-                    <option>General Support</option>
-                    <option>Account & Login</option>
-                    <option>Business Profile</option>
-                    <option>Discover & Matchmaking</option>
-                    <option>Messages & Connections</option>
-                    <option>Billing & Subscription</option>
-                    <option>Report a Problem</option>
-                    <option>Enterprise Inquiry</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold mb-2">
-                    Subject *
-                  </label>
-                  <input
-                    required
-                    maxLength={180}
-                    value={subject}
-                    onChange={e => setSubject(e.target.value)}
-                    placeholder="What do you need help with?"
-                    className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm"
-                  />
-                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold mb-2">
                   Describe your issue *
                 </label>
+
                 <textarea
                   required
                   minLength={10}
                   maxLength={5000}
-                  rows={6}
+                  rows={7}
                   value={message}
                   onChange={e => setMessage(e.target.value)}
                   placeholder="Tell us what happened and how we can help..."
                   className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant focus:border-primary outline-none text-sm resize-y"
                 />
+
                 <p className="text-xs text-on-surface-variant mt-2">
                   Please don't include passwords or sensitive payment details.
                 </p>
               </div>
 
               {error && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-600 p-3 text-sm">
+                <div
+                  role="alert"
+                  className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-600 p-3 text-sm"
+                >
                   {error}
                 </div>
               )}
