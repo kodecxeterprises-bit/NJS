@@ -12,6 +12,32 @@ const json = (data: unknown, status = 200) =>
     headers: { "Cache-Control": "no-store" },
   });
 
+const VALID_CATEGORIES = [
+  "general",
+  "account",
+  "business_profile",
+  "connections",
+  "messaging",
+  "billing",
+  "bug_report",
+  "other",
+] as const;
+
+const VALID_STATUSES = [
+  "open",
+  "in_progress",
+  "waiting_on_user",
+  "resolved",
+  "closed",
+] as const;
+
+const VALID_PRIORITIES = [
+  "low",
+  "normal",
+  "high",
+  "urgent",
+] as const;
+
 function getDatabase(env: SupportEnv) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SECRET_KEY) {
     throw new Error("Missing Supabase Worker configuration.");
@@ -73,12 +99,22 @@ export async function handleCreateSupportTicket(
   const email = String(body?.email ?? "").trim().toLowerCase().slice(0, 254);
   const company = String(body?.company ?? "").trim().slice(0, 160);
   const subject = String(body?.subject ?? "").trim().slice(0, 180);
-  const category = String(body?.category ?? "General Support").trim().slice(0, 80);
+  const requestedCategory = String(body?.category ?? "general")
+    .trim()
+    .toLowerCase();
+
+  const category = (VALID_CATEGORIES as readonly string[]).includes(
+    requestedCategory
+  )
+    ? requestedCategory
+    : "general";
+
   const message = String(body?.message ?? "").trim().slice(0, 5000);
 
-  if (!name || !email || !subject || message.length < 10) {
+  if (name.length < 2 || !email || subject.length < 3 || message.length < 10) {
     return json({
-      error: "Please provide your name, a valid email, subject and a message of at least 10 characters.",
+      error:
+        "Please provide your name, a valid email, a subject of at least 3 characters and a message of at least 10 characters.",
     }, 400);
   }
 
@@ -93,7 +129,7 @@ export async function handleCreateSupportTicket(
     .insert({
       requester_name: name,
       requester_email: email,
-      requester_company: company || null,
+      company: company || null,
       subject,
       category,
       priority: "normal",
@@ -120,10 +156,19 @@ export async function handleCreateSupportTicket(
 
   if (replyError) {
     console.error("Initial support message failed:", replyError.message);
-    // Remove the incomplete ticket rather than leave an empty support request.
     await supabase.from("support_tickets").delete().eq("id", ticket.id);
-    return json({ error: "Your message could not be saved. Please try again." }, 500);
+
+    return json({
+      error: "Your message could not be saved. Please try again.",
+    }, 500);
   }
+
+  await supabase
+    .from("support_tickets")
+    .update({
+      last_reply_at: new Date().toISOString(),
+    })
+    .eq("id", ticket.id);
 
   return json({
     success: true,
@@ -146,11 +191,18 @@ export async function handleAdminSupportGet(
   }
 
   const auth = await requireAdmin(request, env);
-  if ("error" in auth) return json({ error: auth.error }, auth.status);
+  if ("error" in auth) {
+    return json({ error: auth.error }, auth.status);
+  }
 
   const url = new URL(request.url);
   const ticketId = url.searchParams.get("ticketId");
   const status = url.searchParams.get("status");
+
+  if (status && status !== "all" &&
+      !(VALID_STATUSES as readonly string[]).includes(status)) {
+    return json({ error: "Invalid ticket status filter." }, 400);
+  }
 
   if (ticketId) {
     const { data: ticket, error } = await auth.supabase
@@ -173,7 +225,19 @@ export async function handleAdminSupportGet(
       return json({ error: "Could not load ticket replies." }, 500);
     }
 
-    return json({ success: true, ticket, replies: replies ?? [] });
+    const conversation = replies ?? [];
+    const originalMessage = conversation.find(
+      (reply) => !reply.is_admin
+    );
+
+    return json({
+      success: true,
+      ticket: {
+        ...ticket,
+        message: originalMessage?.message ?? "",
+      },
+      replies: conversation,
+    });
   }
 
   let query = auth.supabase
@@ -214,7 +278,9 @@ export async function handleAdminSupportPost(
   }
 
   const auth = await requireAdmin(request, env);
-  if ("error" in auth) return json({ error: auth.error }, auth.status);
+  if ("error" in auth) {
+    return json({ error: auth.error }, auth.status);
+  }
 
   let body: any;
 
@@ -232,7 +298,7 @@ export async function handleAdminSupportPost(
 
   const { data: ticket, error: ticketError } = await auth.supabase
     .from("support_tickets")
-    .select("id, requester_name, requester_email")
+    .select("id, status, priority")
     .eq("id", ticketId)
     .maybeSingle();
 
@@ -240,67 +306,103 @@ export async function handleAdminSupportPost(
     return json({ error: "Ticket not found." }, 404);
   }
 
+  // Send an administrator reply.
   if (body.action === "reply") {
-    const message = String(body.message ?? "").trim().slice(0, 5000);
+    const message = String(body.message ?? "").trim();
 
-    if (!message) {
-      return json({ error: "Reply message cannot be empty." }, 400);
+    if (!message || message.length > 5000) {
+      return json({
+        error: "Reply must contain between 1 and 5000 characters.",
+      }, 400);
     }
 
-    const senderName = String(
-      auth.user.user_metadata?.full_name ??
-      auth.user.user_metadata?.name ??
-      auth.user.email ??
-      "NJS Support"
-    ).slice(0, 120);
-
-    const { error } = await auth.supabase
+    const { data: reply, error: replyError } = await auth.supabase
       .from("support_replies")
       .insert({
         ticket_id: ticketId,
         sender_id: auth.user.id,
-        sender_name: senderName,
-        sender_email: auth.user.email,
+        sender_name:
+          auth.user.user_metadata?.full_name ||
+          auth.user.user_metadata?.name ||
+          auth.user.email ||
+          "NJS Support",
+        sender_email: auth.user.email ?? null,
         is_admin: true,
         message,
-      });
+      })
+      .select("*")
+      .single();
 
-    if (error) {
-      console.error("Support reply failed:", error.message);
+    if (replyError) {
+      console.error("Admin support reply failed:", replyError.message);
       return json({ error: "Could not send your reply." }, 500);
     }
 
-    await auth.supabase
+    const { error: updateError } = await auth.supabase
       .from("support_tickets")
-      .update({ status: "in_progress" })
+      .update({
+        last_reply_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", ticketId);
 
-    return json({ success: true, message: "Reply sent." });
+    if (updateError) {
+      console.error("Ticket timestamp update failed:", updateError.message);
+    }
+
+    return json({
+      success: true,
+      message: "Reply sent successfully.",
+      reply,
+    }, 201);
   }
 
+  // Update ticket status and/or priority.
   const updates: Record<string, string> = {};
 
-  if (["open", "in_progress", "resolved", "closed"].includes(body.status)) {
+  if (body.status !== undefined) {
+    if (
+      !(VALID_STATUSES as readonly string[]).includes(body.status)
+    ) {
+      return json({ error: "Invalid ticket status." }, 400);
+    }
+
     updates.status = body.status;
   }
 
-  if (["low", "normal", "high", "urgent"].includes(body.priority)) {
+  if (body.priority !== undefined) {
+    if (
+      !(VALID_PRIORITIES as readonly string[]).includes(body.priority)
+    ) {
+      return json({ error: "Invalid ticket priority." }, 400);
+    }
+
     updates.priority = body.priority;
   }
 
   if (Object.keys(updates).length === 0) {
-    return json({ error: "No valid ticket update was supplied." }, 400);
+    return json({
+      error: "No valid status or priority update was provided.",
+    }, 400);
   }
 
-  const { error } = await auth.supabase
+  updates.updated_at = new Date().toISOString();
+
+  const { data: updatedTicket, error: updateError } = await auth.supabase
     .from("support_tickets")
     .update(updates)
-    .eq("id", ticketId);
+    .eq("id", ticketId)
+    .select("*")
+    .single();
 
-  if (error) {
-    console.error("Support ticket update failed:", error.message);
+  if (updateError) {
+    console.error("Ticket update failed:", updateError.message);
     return json({ error: "Could not update the ticket." }, 500);
   }
 
-  return json({ success: true, message: "Ticket updated." });
+  return json({
+    success: true,
+    message: "Ticket updated successfully.",
+    ticket: updatedTicket,
+  });
 }
