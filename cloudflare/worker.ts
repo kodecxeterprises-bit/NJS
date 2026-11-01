@@ -12,9 +12,7 @@ interface Env {
 const json = (data: unknown, status = 200) =>
   Response.json(data, {
     status,
-    headers: {
-      "Cache-Control": "no-store",
-    },
+    headers: { "Cache-Control": "no-store" },
   });
 
 function getSupabase(env: Env) {
@@ -45,7 +43,6 @@ async function authenticate(request: Request, env: Env) {
   }
 
   const supabase = getSupabase(env);
-
   const {
     data: { user },
     error,
@@ -64,8 +61,6 @@ async function authenticate(request: Request, env: Env) {
 function mapBusiness(business: any) {
   if (!business) return null;
 
-  // This mapping is for the authenticated owner's own profile.
-  // Never use it for public business discovery.
   return {
     id: business.id,
     userId: business.owner_id,
@@ -98,8 +93,6 @@ function mapBusiness(business: any) {
 }
 
 function mapDiscoverBusiness(business: any) {
-  // Explicit public projection. Do not add owner_id, phone, email,
-  // private profile fields, or account information here.
   return {
     id: business.id,
     businessName: business.business_name ?? "",
@@ -145,22 +138,18 @@ async function handleAuthMe(request: Request, env: Env) {
   }
 
   const auth = await authenticate(request, env);
-
-  if ("error" in auth) {
-    return json({ error: auth.error }, auth.status);
-  }
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
 
   const { supabase, user } = auth;
   const email = user.email!.trim().toLowerCase();
   const metadata = user.user_metadata ?? {};
 
-  const name =
-    String(
-      metadata.full_name ??
-      metadata.name ??
-      metadata.display_name ??
-      email.split("@")[0]
-    ).trim().slice(0, 120) || email.split("@")[0];
+  const name = String(
+    metadata.full_name ??
+    metadata.name ??
+    metadata.display_name ??
+    email.split("@")[0]
+  ).trim().slice(0, 120) || email.split("@")[0];
 
   const { data: existingProfile, error: profileReadError } =
     await supabase
@@ -238,10 +227,7 @@ async function handleBusinessSave(request: Request, env: Env) {
   }
 
   const auth = await authenticate(request, env);
-
-  if ("error" in auth) {
-    return json({ error: auth.error }, auth.status);
-  }
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
 
   const { supabase, user } = auth;
 
@@ -257,10 +243,7 @@ async function handleBusinessSave(request: Request, env: Env) {
     return json({ error: "Invalid business profile data" }, 400);
   }
 
-  if (
-    typeof body.businessName !== "string" ||
-    !body.businessName.trim()
-  ) {
+  if (typeof body.businessName !== "string" || !body.businessName.trim()) {
     return json({ error: "Business name is required" }, 400);
   }
 
@@ -346,18 +329,16 @@ async function handleBusinessDiscover(request: Request, env: Env) {
   }
 
   const auth = await authenticate(request, env);
-
-  if ("error" in auth) {
-    return json({ error: auth.error }, auth.status);
-  }
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
 
   const { supabase, user } = auth;
   const url = new URL(request.url);
 
-  const search = (url.searchParams.get("query") ?? url.searchParams.get("search") ?? "")
-    .trim()
-    .toLowerCase()
-    .slice(0, 100);
+  const search = (
+    url.searchParams.get("query") ??
+    url.searchParams.get("search") ??
+    ""
+  ).trim().toLowerCase().slice(0, 100);
 
   const industry = (url.searchParams.get("industry") ?? "").trim().toLowerCase();
   const type = (url.searchParams.get("type") ?? "").trim().toLowerCase();
@@ -369,8 +350,6 @@ async function handleBusinessDiscover(request: Request, env: Env) {
   const page = Math.max(1, Math.min(10000, Number(url.searchParams.get("page")) || 1));
   const pageSize = Math.max(1, Math.min(50, Number(url.searchParams.get("pageSize")) || 12));
 
-  // Fetch only completed profiles, exclude the signed-in user's own
-  // business, and select only the fields needed by the public directory.
   const { data, error } = await supabase
     .from("business_profiles")
     .select(
@@ -452,11 +431,10 @@ async function handleBusinessDiscover(request: Request, env: Env) {
 
   const total = businesses.length;
   const start = (page - 1) * pageSize;
-  const pagedBusinesses = businesses.slice(start, start + pageSize);
 
   return json({
     success: true,
-    businesses: pagedBusinesses,
+    businesses: businesses.slice(start, start + pageSize),
     pagination: {
       page,
       pageSize,
@@ -465,40 +443,3 @@ async function handleBusinessDiscover(request: Request, env: Env) {
     },
   });
 }
-
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    try {
-      if (url.pathname === "/api/health") {
-        return json({ success: true, service: "NJS Worker" });
-      }
-
-      if (url.pathname === "/api/auth/me") {
-        return await handleAuthMe(request, env);
-      }
-
-      if (url.pathname === "/api/business/save") {
-        return await handleBusinessSave(request, env);
-      }
-
-      if (url.pathname === "/api/business/discover") {
-        return await handleBusinessDiscover(request, env);
-      }
-
-      if (url.pathname.startsWith("/api/")) {
-        return json({ error: "API endpoint not found" }, 404);
-      }
-
-      return env.ASSETS.fetch(request);
-    } catch (error) {
-      console.error(
-        "Worker error:",
-        error instanceof Error ? error.message : "Unknown error"
-      );
-
-      return json({ error: "Internal server error" }, 500);
-    }
-  },
-};
