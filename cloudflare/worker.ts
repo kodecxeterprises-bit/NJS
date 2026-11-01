@@ -413,7 +413,7 @@ async function handleBusinessDiscover(request: Request, env: Env) {
 
   if (location && location !== "global") {
     businesses = businesses.filter((business: any) =>
-      \`\${business.city} \${business.country}\`.toLowerCase().includes(location)
+      `${business.city} ${business.country}`.toLowerCase().includes(location)
     );
   }
 
