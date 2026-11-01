@@ -528,7 +528,52 @@ export default function AdminDashboardPage({
       </aside>
 
       <main className="flex-1 min-w-0">
-        <header className="sticky top-0 z-20 h-16 bg-[#09090f]/90 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-5 lg:px-8">
+        
+<header className="sticky top-0 z-20 min-h-16 bg-[#09090f]/90 backdrop-blur-xl border-b border-white/5 flex items-center justify-between gap-3 px-4 sm:px-5 lg:px-8 py-2">
+  <div className="flex items-center gap-3 min-w-0">
+    <button
+      className="lg:hidden text-zinc-400 shrink-0"
+      onClick={() => setSidebarOpen(true)}
+      aria-label="Open navigation"
+    >
+      <span className="material-symbols-outlined">menu</span>
+    </button>
+
+    <div className="min-w-0">
+      <h2 className="font-semibold truncate">{activeSection}</h2>
+      <p className="text-[11px] text-zinc-500 truncate">
+        NJS Platform / {activeSection}
+      </p>
+    </div>
+  </div>
+
+  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+    <button
+      onClick={() => onNavigate("dashboard")}
+      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-sm transition-colors"
+      title="Return to NJS"
+    >
+      <span className="material-symbols-outlined text-lg">arrow_back</span>
+      <span className="hidden sm:inline">Back to NJS</span>
+    </button>
+
+    <button
+      onClick={refreshCurrent}
+      className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"
+      title="Refresh"
+    >
+      <span className="material-symbols-outlined text-zinc-400">
+        refresh
+      </span>
+    </button>
+
+    <div className="w-2 h-2 rounded-full bg-emerald-400" />
+    <span className="text-xs text-zinc-400 hidden sm:block">
+      Control centre
+    </span>
+  </div>
+</header>
+
           <div className="flex items-center gap-3">
             <button className="lg:hidden text-zinc-400" onClick={() => setSidebarOpen(true)}>
               <span className="material-symbols-outlined">menu</span>
