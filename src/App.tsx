@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
@@ -65,6 +66,30 @@ const MainAppContent: React.FC = () => {
     setNavigationState(state || null);
     window.history.pushState({}, '', `/${formatted === 'landing' ? '' : formatted}`);
   };
+
+  // Redirect authenticated users after OAuth returns to the homepage.
+  useEffect(() => {
+    if (isLoading || !user) return;
+
+    // Only redirect users arriving at the landing or sign-in page.
+    if (
+      currentPath !== 'landing' &&
+      currentPath !== '' &&
+      currentPath !== 'sign-in'
+    ) {
+      return;
+    }
+
+    const destination =
+      !businessProfile || !businessProfile.onboardingCompleted
+        ? 'onboarding'
+        : 'dashboard';
+
+    setCurrentPath(destination);
+    setNavigationState(null);
+
+    window.history.replaceState({}, '', `/${destination}`);
+  }, [user, businessProfile, isLoading, currentPath]);
 
   // Loading splash
   if (isLoading) {
