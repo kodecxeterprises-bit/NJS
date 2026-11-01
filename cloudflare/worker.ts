@@ -443,3 +443,379 @@ async function handleBusinessDiscover(request: Request, env: Env) {
     },
   });
 }
+
+
+async function handleConnectionsList(request: Request, env: Env) {
+  if (request.method !== "GET") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const auth = await authenticate(request, env);
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
+
+  const { supabase, user } = auth;
+
+  const { data: rows, error } = await supabase
+    .from("connections")
+    .select("*")
+    .or(`requester_id.eq.${user.id},recipient_id.eq.${user.id}`)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Connections lookup failed:", error.message);
+    return json({ error: "Could not load your connections." }, 500);
+  }
+
+  const connections = rows ?? [];
+  const otherUserIds = [...new Set(
+    connections.map((connection: any) =>
+      connection.requester_id === user.id
+        ? connection.recipient_id
+        : connection.requester_id
+    )
+  )];
+
+  const { data: profiles, error: profileError } = otherUserIds.length
+    ? await supabase
+        .from("business_profiles")
+        .select(
+          "id, owner_id, business_name, business_type, industry, country, city, business_description, products, services, capabilities, offers, needs, target_markets, is_verified, created_at"
+        )
+        .in("owner_id", otherUserIds)
+    : { data: [], error: null };
+
+  if (profileError) {
+    console.error("Partner profile lookup failed:", profileError.message);
+    return json({ error: "Could not load partner profiles." }, 500);
+  }
+
+  const profileByOwner = new Map(
+    (profiles ?? []).map((profile: any) => [profile.owner_id, profile])
+  );
+
+  const result = connections.map((connection: any) => {
+    const isInitiator = connection.requester_id === user.id;
+    const otherUserId = isInitiator
+      ? connection.recipient_id
+      : connection.requester_id;
+    const partner = profileByOwner.get(otherUserId);
+
+    return {
+      id: connection.id,
+      requesterUserId: connection.requester_id,
+      targetUserId: connection.recipient_id,
+      requesterBusinessId: isInitiator ? null : partner?.id ?? null,
+      targetBusinessId: isInitiator ? partner?.id ?? null : null,
+      status: connection.status,
+      message: connection.message ?? "",
+      createdAt: connection.created_at,
+      updatedAt: connection.updated_at,
+      isInitiator,
+      partnerBusiness: partner ? mapDiscoverBusiness(partner) : null,
+    };
+  });
+
+  return json({ success: true, connections: result });
+}
+
+async function handleConnectionRequest(request: Request, env: Env) {
+  if (request.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const auth = await authenticate(request, env);
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
+
+  const { supabase, user } = auth;
+
+  let body: any;
+
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid request body." }, 400);
+  }
+
+  const targetBusinessId = String(body?.targetBusinessId ?? "").trim();
+  const message = typeof body?.message === "string"
+    ? body.message.trim().slice(0, 1000)
+    : "";
+
+  if (!targetBusinessId) {
+    return json({ error: "A target business is required." }, 400);
+  }
+
+  const { data: myBusiness, error: myBusinessError } = await supabase
+    .from("business_profiles")
+    .select("id, owner_id, business_name")
+    .eq("owner_id", user.id)
+    .eq("onboarding_completed", true)
+    .maybeSingle();
+
+  if (myBusinessError || !myBusiness) {
+    return json({
+      error: "Complete your business profile before connecting.",
+    }, 400);
+  }
+
+  const { data: targetBusiness, error: targetError } = await supabase
+    .from("business_profiles")
+    .select("id, owner_id, business_name")
+    .eq("id", targetBusinessId)
+    .eq("onboarding_completed", true)
+    .maybeSingle();
+
+  if (targetError || !targetBusiness) {
+    return json({ error: "That business could not be found." }, 404);
+  }
+
+  if (targetBusiness.owner_id === user.id) {
+    return json({ error: "You cannot connect with your own business." }, 400);
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("connections")
+    .select("id, status")
+    .or(
+      `and(requester_id.eq.${user.id},recipient_id.eq.${targetBusiness.owner_id}),and(requester_id.eq.${targetBusiness.owner_id},recipient_id.eq.${user.id})`
+    )
+    .maybeSingle();
+
+  if (existingError) {
+    console.error("Existing connection lookup failed:", existingError.message);
+    return json({ error: "Could not check existing connection." }, 500);
+  }
+
+  if (existing && ["pending", "accepted"].includes(existing.status)) {
+    return json({
+      error: existing.status === "pending"
+        ? "A connection request already exists."
+        : "You are already connected to this business.",
+    }, 409);
+  }
+
+  let saved: any;
+  let saveError: any;
+
+  if (existing) {
+    const result = await supabase
+      .from("connections")
+      .update({
+        requester_id: user.id,
+        recipient_id: targetBusiness.owner_id,
+        message,
+        status: "pending",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id)
+      .select("*")
+      .single();
+
+    saved = result.data;
+    saveError = result.error;
+  } else {
+    const result = await supabase
+      .from("connections")
+      .insert({
+        requester_id: user.id,
+        recipient_id: targetBusiness.owner_id,
+        message,
+        status: "pending",
+      })
+      .select("*")
+      .single();
+
+    saved = result.data;
+    saveError = result.error;
+  }
+
+  if (saveError || !saved) {
+    console.error("Connection request failed:", saveError?.message);
+    return json({
+      error: "Could not send the connection request. Please try again.",
+    }, 500);
+  }
+
+  const { error: notificationError } = await supabase
+    .from("notifications")
+    .insert({
+      user_id: targetBusiness.owner_id,
+      type: "connection_request",
+      title: "New Connection Request",
+      message: `${myBusiness.business_name} would like to connect with your business.`,
+      link: "/connections",
+    });
+
+  if (notificationError) {
+    console.error("Connection notification failed:", notificationError.message);
+  }
+
+  return json({
+    success: true,
+    connection: {
+      id: saved.id,
+      status: saved.status,
+      createdAt: saved.created_at,
+    },
+  }, 201);
+}
+
+async function handleConnectionRespond(request: Request, env: Env) {
+  if (request.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const auth = await authenticate(request, env);
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
+
+  const { supabase, user } = auth;
+
+  let body: any;
+
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid request body." }, 400);
+  }
+
+  const connectionId = String(body?.connectionId ?? "").trim();
+  const action = String(body?.action ?? "").trim();
+
+  if (!connectionId || !["accept", "reject", "remove"].includes(action)) {
+    return json({ error: "Invalid connection action." }, 400);
+  }
+
+  const { data: connection, error } = await supabase
+    .from("connections")
+    .select("*")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (error || !connection) {
+    return json({ error: "Connection request not found." }, 404);
+  }
+
+  const isRequester = connection.requester_id === user.id;
+  const isRecipient = connection.recipient_id === user.id;
+
+  if (!isRequester && !isRecipient) {
+    return json({
+      error: "You are not a participant in this connection.",
+    }, 403);
+  }
+
+  if (action === "accept" || action === "reject") {
+    if (!isRecipient) {
+      return json({
+        error: "Only the recipient can respond to this request.",
+      }, 403);
+    }
+
+    if (connection.status !== "pending") {
+      return json({ error: "This request is no longer pending." }, 409);
+    }
+  } else {
+    const canRemove =
+      (connection.status === "pending" && isRequester) ||
+      connection.status === "accepted";
+
+    if (!canRemove) {
+      return json({ error: "You cannot remove this connection." }, 403);
+    }
+  }
+
+  const nextStatus =
+    action === "accept" ? "accepted" :
+    action === "reject" ? "rejected" : "removed";
+
+  const { data: updated, error: updateError } = await supabase
+    .from("connections")
+    .update({
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", connectionId)
+    .eq("status", connection.status)
+    .select("*")
+    .maybeSingle();
+
+  if (updateError || !updated) {
+    return json({
+      error: "This request changed before your action could be saved. Refresh and try again.",
+    }, 409);
+  }
+
+  if (action === "accept") {
+    const { data: myBusiness } = await supabase
+      .from("business_profiles")
+      .select("business_name")
+      .eq("owner_id", user.id)
+      .maybeSingle();
+
+    const { error: notificationError } = await supabase
+      .from("notifications")
+      .insert({
+        user_id: connection.requester_id,
+        type: "connection_accepted",
+        title: "Connection Accepted",
+        message: `${myBusiness?.business_name || "A business"} accepted your connection request.`,
+        link: "/connections",
+      });
+
+    if (notificationError) {
+      console.error("Acceptance notification failed:", notificationError.message);
+    }
+  }
+
+  return json({ success: true, status: nextStatus });
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    try {
+      if (url.pathname === "/api/health") {
+        return json({ success: true, service: "NJS Worker" });
+      }
+
+      if (url.pathname === "/api/auth/me") {
+        return await handleAuthMe(request, env);
+      }
+
+      if (url.pathname === "/api/business/save") {
+        return await handleBusinessSave(request, env);
+      }
+
+      if (url.pathname === "/api/business/discover") {
+        return await handleBusinessDiscover(request, env);
+      }
+
+      if (url.pathname === "/api/connections") {
+        return await handleConnectionsList(request, env);
+      }
+
+      if (url.pathname === "/api/connections/request") {
+        return await handleConnectionRequest(request, env);
+      }
+
+      if (url.pathname === "/api/connections/respond") {
+        return await handleConnectionRespond(request, env);
+      }
+
+      if (url.pathname.startsWith("/api/")) {
+        return json({ error: "API endpoint not found" }, 404);
+      }
+
+      return env.ASSETS.fetch(request);
+    } catch (error) {
+      console.error(
+        "Worker error:",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+
+      return json({ error: "Internal server error" }, 500);
+    }
+  },
+};
+
