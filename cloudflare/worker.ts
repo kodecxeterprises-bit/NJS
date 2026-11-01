@@ -1,5 +1,12 @@
+TypeScript
 
 import { createClient } from "@supabase/supabase-js";
+
+import {
+  handleCreateSupportTicket,
+  handleAdminSupportGet,
+  handleAdminSupportPost,
+} from "./support-routes";
 
 interface Env {
   SUPABASE_URL: string;
@@ -43,6 +50,7 @@ async function authenticate(request: Request, env: Env) {
   }
 
   const supabase = getSupabase(env);
+
   const {
     data: { user },
     error,
@@ -220,6 +228,9 @@ async function handleAuthMe(request: Request, env: Env) {
     },
   });
 }
+
+// END OF PART 1
+// PART 2 CONTINUES DIRECTLY BELOW
 
 async function handleBusinessSave(request: Request, env: Env) {
   if (request.method !== "POST") {
@@ -402,7 +413,7 @@ async function handleBusinessDiscover(request: Request, env: Env) {
 
   if (location && location !== "global") {
     businesses = businesses.filter((business: any) =>
-      `${business.city} ${business.country}`.toLowerCase().includes(location)
+      \`\${business.city} \${business.country}\`.toLowerCase().includes(location)
     );
   }
 
@@ -444,7 +455,6 @@ async function handleBusinessDiscover(request: Request, env: Env) {
   });
 }
 
-
 async function handleConnectionsList(request: Request, env: Env) {
   if (request.method !== "GET") {
     return json({ error: "Method not allowed" }, 405);
@@ -458,7 +468,7 @@ async function handleConnectionsList(request: Request, env: Env) {
   const { data: rows, error } = await supabase
     .from("connections")
     .select("*")
-    .or(`requester_id.eq.${user.id},recipient_id.eq.${user.id}`)
+    .or(\`requester_id.eq.\${user.id},recipient_id.eq.\${user.id}\`)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -577,7 +587,7 @@ async function handleConnectionRequest(request: Request, env: Env) {
     .from("connections")
     .select("id, status")
     .or(
-      `and(requester_id.eq.${user.id},recipient_id.eq.${targetBusiness.owner_id}),and(requester_id.eq.${targetBusiness.owner_id},recipient_id.eq.${user.id})`
+      \`and(requester_id.eq.\${user.id},recipient_id.eq.\${targetBusiness.owner_id}),and(requester_id.eq.\${targetBusiness.owner_id},recipient_id.eq.\${user.id})\`
     )
     .maybeSingle();
 
@@ -642,7 +652,7 @@ async function handleConnectionRequest(request: Request, env: Env) {
       user_id: targetBusiness.owner_id,
       type: "connection_request",
       title: "New Connection Request",
-      message: `${myBusiness.business_name} would like to connect with your business.`,
+      message: \`\${myBusiness.business_name} would like to connect with your business.\`,
       link: "/connections",
     });
 
@@ -659,6 +669,9 @@ async function handleConnectionRequest(request: Request, env: Env) {
     },
   }, 201);
 }
+
+// END OF PART 2
+// PART 3 CONTINUES DIRECTLY BELOW
 
 async function handleConnectionRespond(request: Request, env: Env) {
   if (request.method !== "POST") {
@@ -758,7 +771,7 @@ async function handleConnectionRespond(request: Request, env: Env) {
         user_id: connection.requester_id,
         type: "connection_accepted",
         title: "Connection Accepted",
-        message: `${myBusiness?.business_name || "A business"} accepted your connection request.`,
+        message: \`\${myBusiness?.business_name || "A business"} accepted your connection request.\`,
         link: "/connections",
       });
 
@@ -803,19 +816,35 @@ export default {
         return await handleConnectionRespond(request, env);
       }
 
-      if (url.pathname.startsWith("/api/")) {
-        return json({ error: "API endpoint not found" }, 404);
+      // Public support ticket submission
+      if (url.pathname === "/api/support/tickets") {
+        return await handleCreateSupportTicket(request, env);
       }
 
-      return env.ASSETS.fetch(request);
-    } catch (error) {
-      console.error(
-        "Worker error:",
-        error instanceof Error ? error.message : "Unknown error"
-      );
+      // Admin support inbox
+      if (url.pathname === "/api/admin/support") {
+        if (request.method === "GET") {
+          return await handleAdminSupportGet(request, env);
+        }
 
-      return json({ error: "Internal server error" }, 500);
+        if (request.method === "POST") {
+          return await handleAdminSupportPost(request, env);
+        }
+
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      if (url.pathname.startsWith("/api/")) {
+        return json({ error: "API route not found" }, 404);
+      }
+
+      return await env.ASSETS.fetch(request);
+    } catch (error) {
+      console.error("Worker request failed:", error);
+
+      return json({
+        error: "An unexpected server error occurred.",
+      }, 500);
     }
   },
 };
-
