@@ -19,7 +19,7 @@ jobs:
 
       - name: Extract NJS messaging updates
         run: |
-          ZIP="njs-messaging-updated-files.zip"
+          ZIP="NJS.zip"
 
           if [ ! -f "$ZIP" ]; then
             echo "$ZIP was not found in the repository root."
