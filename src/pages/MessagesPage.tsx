@@ -1,5 +1,11 @@
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
@@ -16,12 +22,14 @@ interface ChatConversation extends Conversation {
 }
 
 function getInitials(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join('') || 'B';
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join('') || 'B'
+  );
 }
 
 function formatMessageTime(value?: string): string {
@@ -44,9 +52,7 @@ function formatConversationTime(value?: string): string {
 
   if (Number.isNaN(date.getTime())) return '';
 
-  const today = new Date();
-
-  if (date.toDateString() === today.toDateString()) {
+  if (date.toDateString() === new Date().toDateString()) {
     return formatMessageTime(value);
   }
 
@@ -56,7 +62,9 @@ function formatConversationTime(value?: string): string {
   });
 }
 
-export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
+export const MessagesPage: React.FC<MessagesPageProps> = ({
+  onNavigate,
+}) => {
   const { user, businessProfile, apiFetch } = useAuth();
   const { showToast } = useToast();
 
@@ -85,12 +93,13 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
     setLoadError('');
 
     try {
-      // The Worker supplies safe partner-business details.
       const connectionResponse = await apiFetch('/api/connections');
 
       const acceptedConnections = (
         connectionResponse.connections ?? []
-      ).filter((connection: any) => connection.status === 'accepted');
+      ).filter(
+        (connection: any) => connection.status === 'accepted'
+      );
 
       if (acceptedConnections.length === 0) {
         setConversations([]);
@@ -99,12 +108,12 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
         return;
       }
 
-      // Supabase RLS only returns conversations belonging to this user
-      // where the business connection is still accepted.
       const { data: conversationRows, error: conversationError } =
         await supabase
           .from('conversations')
-          .select('id, user_a, user_b, created_at, last_message_at')
+          .select(
+            'id, user_a, user_b, created_at, last_message_at'
+          )
           .or(`user_a.eq.${user.id},user_b.eq.${user.id}`)
           .order('created_at', { ascending: false });
 
@@ -121,11 +130,14 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
 
       const conversationIds = rows.map((row) => row.id);
 
-      const { data: messageRows, error: messageError } = await supabase
-        .from('messages')
-        .select('id, conversation_id, sender_id, content, is_read, created_at')
-        .in('conversation_id', conversationIds)
-        .order('created_at', { ascending: false });
+      const { data: messageRows, error: messageError } =
+        await supabase
+          .from('messages')
+          .select(
+            'id, conversation_id, sender_id, content, is_read, created_at'
+          )
+          .in('conversation_id', conversationIds)
+          .order('created_at', { ascending: false });
 
       if (messageError) throw messageError;
 
@@ -176,13 +188,17 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
             partnerBusiness,
             createdAt: row.created_at,
             lastMessageAt:
-              latestMessage?.created_at ?? row.last_message_at ?? row.created_at,
+              latestMessage?.created_at ??
+              row.last_message_at ??
+              row.created_at,
             lastMessageSnippet:
               latestMessage?.content ?? 'Start your conversation',
             unreadCount,
           } as ChatConversation;
         })
-        .filter((item): item is ChatConversation => item !== null)
+        .filter(
+          (item): item is ChatConversation => item !== null
+        )
         .sort(
           (a, b) =>
             new Date(b.lastMessageAt).getTime() -
@@ -200,56 +216,68 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
       });
     } catch (error: any) {
       console.error('Conversation loading failed:', error);
-      setLoadError(error.message || 'Could not load your conversations.');
+      setLoadError(
+        error.message || 'Could not load your conversations.'
+      );
     } finally {
       setIsLoadingConversations(false);
     }
   }, [user?.id, businessProfile?.id, apiFetch]);
 
-  const fetchMessages = useCallback(async (conversationId: string) => {
-    setIsLoadingMessages(true);
+  const fetchMessages = useCallback(
+    async (conversationId: string) => {
+      setIsLoadingMessages(true);
 
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('id, conversation_id, sender_id, content, is_read, created_at')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
+      try {
+        const { data, error } = await supabase
+          .from('messages')
+          .select(
+            'id, conversation_id, sender_id, content, is_read, created_at'
+          )
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: true });
 
-      if (error) throw error;
+        if (error) throw error;
 
-      const mappedMessages: Message[] = (data ?? []).map((message) => ({
-        id: message.id,
-        conversationId: message.conversation_id,
-        senderUserId: message.sender_id,
-        senderBusinessId:
-          message.sender_id === user?.id
-            ? businessProfile?.id ?? ''
-            : activeConversation?.partnerBusiness?.id ?? '',
-        recipientUserId:
-          message.sender_id === user?.id
-            ? activeConversation?.partnerUserId ?? ''
-            : user?.id ?? '',
-        content: message.content,
-        isRead: message.is_read,
-        createdAt: message.created_at,
-      }));
+        const mappedMessages: Message[] = (data ?? []).map(
+          (message) => ({
+            id: message.id,
+            conversationId: message.conversation_id,
+            senderUserId: message.sender_id,
+            senderBusinessId:
+              message.sender_id === user?.id
+                ? businessProfile?.id ?? ''
+                : activeConversation?.partnerBusiness?.id ?? '',
+            recipientUserId:
+              message.sender_id === user?.id
+                ? activeConversation?.partnerUserId ?? ''
+                : user?.id ?? '',
+            content: message.content,
+            isRead: message.is_read,
+            createdAt: message.created_at,
+          })
+        );
 
-      setMessages(mappedMessages);
-    } catch (error: any) {
-      console.error('Message loading failed:', error);
-      showToast(error.message || 'Could not load messages.', 'error');
-      setMessages([]);
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }, [
-    user?.id,
-    businessProfile?.id,
-    activeConversation?.partnerBusiness?.id,
-    activeConversation?.partnerUserId,
-    showToast,
-  ]);
+        setMessages(mappedMessages);
+      } catch (error: any) {
+        console.error('Message loading failed:', error);
+        showToast(
+          error.message || 'Could not load messages.',
+          'error'
+        );
+        setMessages([]);
+      } finally {
+        setIsLoadingMessages(false);
+      }
+    },
+    [
+      user?.id,
+      businessProfile?.id,
+      activeConversation?.partnerBusiness?.id,
+      activeConversation?.partnerUserId,
+      showToast,
+    ]
+  );
 
   useEffect(() => {
     void fetchConversations();
@@ -263,11 +291,98 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
     }
   }, [activeConversationId, fetchMessages]);
 
+  // LIVE MESSAGE SUBSCRIPTION
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!activeConversationId || !user?.id) return;
+
+    const channel = supabase
+      .channel(`njs-chat-${activeConversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${activeConversationId}`,
+        },
+        (payload) => {
+          const incoming = payload.new as {
+            id: string;
+            conversation_id: string;
+            sender_id: string;
+            content: string;
+            is_read: boolean;
+            created_at: string;
+          };
+
+          const newMessage: Message = {
+            id: incoming.id,
+            conversationId: incoming.conversation_id,
+            senderUserId: incoming.sender_id,
+            senderBusinessId:
+              incoming.sender_id === user.id
+                ? businessProfile?.id ?? ''
+                : activeConversation?.partnerBusiness?.id ?? '',
+            recipientUserId:
+              incoming.sender_id === user.id
+                ? activeConversation?.partnerUserId ?? ''
+                : user.id,
+            content: incoming.content,
+            isRead: incoming.is_read,
+            createdAt: incoming.created_at,
+          };
+
+          setMessages((current) => {
+            if (current.some((message) => message.id === incoming.id)) {
+              return current;
+            }
+
+            return [...current, newMessage];
+          });
+
+          setConversations((current) =>
+            current
+              .map((conversation) =>
+                conversation.id === activeConversationId
+                  ? {
+                      ...conversation,
+                      lastMessageSnippet: incoming.content,
+                      lastMessageAt: incoming.created_at,
+                    }
+                  : conversation
+              )
+              .sort(
+                (a, b) =>
+                  new Date(b.lastMessageAt).getTime() -
+                  new Date(a.lastMessageAt).getTime()
+              )
+          );
+        }
+      )
+      .subscribe((status) => {
+        console.log('NJS chat realtime:', status);
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [
+    activeConversationId,
+    user?.id,
+    businessProfile?.id,
+    activeConversation?.partnerBusiness?.id,
+    activeConversation?.partnerUserId,
+  ]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: 'smooth',
+    });
   }, [messages]);
 
-  const handleSendMessage = async (event: React.FormEvent) => {
+  const handleSendMessage = async (
+    event: React.FormEvent
+  ) => {
     event.preventDefault();
 
     const content = messageInput.trim();
@@ -275,7 +390,10 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
     if (!activeConversationId || !content || isSending) return;
 
     if (content.length > 10000) {
-      showToast('Messages cannot exceed 10,000 characters.', 'error');
+      showToast(
+        'Messages cannot exceed 10,000 characters.',
+        'error'
+      );
       return;
     }
 
@@ -289,7 +407,9 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
           sender_id: user?.id,
           content,
         })
-        .select('id, conversation_id, sender_id, content, is_read, created_at')
+        .select(
+          'id, conversation_id, sender_id, content, is_read, created_at'
+        )
         .single();
 
       if (error) throw error;
@@ -299,13 +419,21 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
         conversationId: data.conversation_id,
         senderUserId: data.sender_id,
         senderBusinessId: businessProfile?.id ?? '',
-        recipientUserId: activeConversation?.partnerUserId ?? '',
+        recipientUserId:
+          activeConversation?.partnerUserId ?? '',
         content: data.content,
         isRead: data.is_read,
         createdAt: data.created_at,
       };
 
-      setMessages((current) => [...current, newMessage]);
+      setMessages((current) => {
+        if (current.some((message) => message.id === data.id)) {
+          return current;
+        }
+
+        return [...current, newMessage];
+      });
+
       setMessageInput('');
 
       setConversations((current) =>
@@ -327,7 +455,10 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
       );
     } catch (error: any) {
       console.error('Message sending failed:', error);
-      showToast(error.message || 'Failed to send message.', 'error');
+      showToast(
+        error.message || 'Failed to send message.',
+        'error'
+      );
     } finally {
       setIsSending(false);
     }
@@ -335,15 +466,17 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
 
   return (
     <div className="flex flex-col w-full h-[calc(100dvh-8rem)] min-h-[480px] gap-4">
-      {/* Header */}
+      {/* Page header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <span className="text-xs font-semibold uppercase tracking-widest text-primary block">
             Direct Messaging
           </span>
+
           <h1 className="text-2xl font-bold text-on-surface">
             Conversations
           </h1>
+
           <p className="text-xs text-on-surface-variant mt-1">
             Private messaging with your connected business partners.
           </p>
@@ -375,6 +508,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
         </div>
       </div>
 
+      {/* Error message */}
       {loadError && (
         <div className="rounded-xl bg-red-500/10 p-4 text-sm text-red-500">
           {loadError}
@@ -388,6 +522,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
         </div>
       )}
 
+      {/* Loading */}
       {isLoadingConversations ? (
         <div className="flex-1 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest flex items-center justify-center">
           <div className="text-center">
@@ -400,6 +535,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
           </div>
         </div>
       ) : conversations.length === 0 ? (
+        /* Empty state */
         <div className="flex-1 bg-surface-container-lowest rounded-2xl p-8 sm:p-12 text-center border border-outline-variant/30 flex flex-col items-center justify-center shadow-xs">
           <div className="w-16 h-16 rounded-full bg-surface-container-low text-primary flex items-center justify-center mb-4">
             <span className="material-symbols-outlined text-3xl">
@@ -428,8 +564,10 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
           </button>
         </div>
       ) : (
+        /* Messaging layout */
         <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 bg-surface-container-lowest rounded-2xl border border-outline-variant/30 shadow-xs overflow-hidden">
-          {/* Conversation list */}
+
+          {/* Conversation sidebar */}
           <aside
             className={`${
               activeConversationId ? 'hidden md:flex' : 'flex'
@@ -538,7 +676,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
                   </span>
                 </header>
 
-                {/* Messages */}
+                {/* Message history */}
                 <div className="flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto space-y-4 bg-surface">
                   {isLoadingMessages ? (
                     <div className="h-full flex items-center justify-center">
@@ -565,7 +703,8 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
                     </div>
                   ) : (
                     messages.map((message) => {
-                      const isMe = message.senderUserId === user?.id;
+                      const isMe =
+                        message.senderUserId === user?.id;
 
                       return (
                         <div
@@ -596,7 +735,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Message composer */}
+                {/* Composer */}
                 <form
                   onSubmit={handleSendMessage}
                   className="p-3 sm:p-4 border-t border-outline-variant/20 bg-surface-container-lowest flex items-center gap-2 sm:gap-3"
@@ -614,7 +753,9 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
 
                   <button
                     type="submit"
-                    disabled={isSending || !messageInput.trim()}
+                    disabled={
+                      isSending || !messageInput.trim()
+                    }
                     className="px-4 sm:px-5 py-3 rounded-xl bg-primary text-on-primary font-semibold text-sm flex items-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50 shrink-0"
                   >
                     <span className="hidden sm:inline">
