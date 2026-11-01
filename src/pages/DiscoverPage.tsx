@@ -545,4 +545,38 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
       {/* AI feature preview */}
       <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
         <div>
+          <div className="flex items-center gap-2 text-primary">
+            <span className="material-symbols-outlined text-xl">
+              auto_awesome
+            </span>
+            <span className="text-xs font-bold uppercase tracking-[0.15em]">
+              Coming Soon
+            </span>
+          </div>
+
+          <h2 className="text-xl sm:text-2xl font-bold text-on-surface mt-3">
+            Smarter business matching
+          </h2>
+
+          <p className="text-sm text-on-surface-variant leading-relaxed mt-2 max-w-xl">
+            NJS is working towards intelligent business matchmaking that helps
+            you discover relevant suppliers, manufacturers, partners, and
+            customers based on your business goals.
+          </p>
+        </div>
+
+        <div className="shrink-0">
+          <span className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-lowest px-5 py-3 text-sm font-semibold text-on-surface-variant">
+            <span className="material-symbols-outlined text-lg">
+              psychology
+            </span>
+            AI matching — Coming Soon
+          </span>
+        </div>
+      </section>
+    </div>
+  );
+};
+
+export default DiscoverPage;
           
