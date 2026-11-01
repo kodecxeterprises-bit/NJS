@@ -22,20 +22,6 @@ import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 // Onboarding
 import { OnboardingFlow } from './pages/onboarding/OnboardingFlow';
 
-  // 4. Admin Dashboard (separate from the regular AppLayout)
-  if (currentPath === 'admin') {
-    if (!user) {
-      return (
-        <SignInPage
-          onNavigate={navigate}
-          onSignedIn={() => navigate('admin')}
-        />
-      );
-    }
-
-    return <AdminDashboardPage />;
-  }
-
 // Application Pages
 import { DashboardPage } from './pages/DashboardPage';
 import { AiMatchesPage } from './pages/AiMatchesPage';
@@ -234,6 +220,19 @@ useEffect(() => {
         onNavigate={navigate}
       />
     );
+  }
+  // Admin Dashboard (separate from the regular AppLayout)
+  if (currentPath === 'admin') {
+    if (!user) {
+      return (
+        <SignInPage
+          onNavigate={navigate}
+          onSignedIn={() => navigate('admin')}
+        />
+      );
+    }
+
+    return <AdminDashboardPage />;
   }
 
   // 4. Authenticated Application Routes (Protected via AppLayout)
