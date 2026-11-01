@@ -464,3 +464,231 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
           </button>
         </div>
       )}
+
+
+      {/* Real business results */}
+      {!isLoading && !error && businesses.length > 0 && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {businesses.map((business) => {
+            const tags = getTags(
+              [
+                ...business.offers,
+                ...business.products,
+                ...business.services,
+                ...business.capabilities,
+              ],
+              5
+            );
+
+            const requestSent = sentRequests.includes(business.id);
+            const isSending = sendingRequest === business.id;
+
+            return (
+              <article
+                key={business.id}
+                className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-5 sm:p-6 shadow-xs hover:shadow-md hover:border-primary/40 transition-all"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 shrink-0 rounded-2xl bg-primary-container text-on-primary-container flex items-center justify-center text-lg font-bold">
+                    {getInitials(business.businessName)}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-bold text-on-surface break-words">
+                        {business.businessName}
+                      </h3>
+
+                      {business.isVerified && (
+                        <span
+                          title="NJS verified business"
+                          className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary"
+                        >
+                          <span className="material-symbols-outlined text-sm">
+                            verified
+                          </span>
+                          Verified
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-sm text-on-surface-variant mt-1">
+                      {business.businessType}
+                      {business.industry ? ` · ${business.industry}` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-5 text-xs text-on-surface-variant">
+                  {(business.city || business.country) && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-base">
+                        location_on
+                      </span>
+                      {[business.city, business.country]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </span>
+                  )}
+
+                  {business.industry && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-base">
+                        business
+                      </span>
+                      {business.industry}
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-sm text-on-surface-variant leading-relaxed mt-5">
+                  {business.businessDescription ||
+                    'This business has not added a description yet.'}
+                </p>
+
+                {tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-5">
+                    {tags.map((tag, index) => (
+                      <span
+                        key={`${business.id}-${index}`}
+                        className="rounded-lg bg-surface-container-low px-3 py-1.5 text-xs font-medium text-on-surface-variant"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-3 mt-6 pt-5 border-t border-outline-variant/20">
+                  <span className="text-xs text-on-surface-variant">
+                    Registered on NJS
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => void sendConnectionRequest(business)}
+                    disabled={requestSent || isSending}
+                    className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-opacity disabled:cursor-not-allowed ${
+                      requestSent
+                        ? 'bg-green-500/10 text-green-600'
+                        : 'bg-primary text-on-primary hover:opacity-90'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base">
+                      {requestSent ? 'check_circle' : 'handshake'}
+                    </span>
+
+                    {isSending
+                      ? 'Sending...'
+                      : requestSent
+                        ? 'Request sent'
+                        : 'Connect'}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && !error && businesses.length === 0 && (
+        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-6 py-14 text-center">
+          <div className="mx-auto w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+            <span className="material-symbols-outlined text-3xl">
+              travel_explore
+            </span>
+          </div>
+
+          <h3 className="text-xl font-bold text-on-surface mt-5">
+            {hasFilters ? 'No matching businesses' : 'Your network is growing'}
+          </h3>
+
+          <p className="text-sm text-on-surface-variant max-w-md mx-auto mt-2">
+            {hasFilters
+              ? 'Try changing your search or clearing some filters to see more businesses.'
+              : 'There are no other completed business profiles to display just yet. Check back as more businesses join NJS.'}
+          </p>
+
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="mt-5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {!isLoading && !error && pagination.totalPages > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant/20 pt-5">
+          <p className="text-sm text-on-surface-variant">
+            Page {pagination.page} of {pagination.totalPages}
+          </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() =>
+                setPage((current) => Math.max(1, current - 1))
+              }
+              className="rounded-xl border border-outline-variant/40 px-4 py-2 text-sm font-semibold text-on-surface disabled:opacity-40"
+            >
+              Previous
+            </button>
+
+            <button
+              type="button"
+              disabled={page >= pagination.totalPages}
+              onClick={() => setPage((current) => current + 1)}
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* AI feature preview */}
+      <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+        <div>
+          <div className="flex items-center gap-2 text-primary">
+            <span className="material-symbols-outlined text-xl">
+              auto_awesome
+            </span>
+
+            <span className="text-xs font-bold uppercase tracking-[0.15em]">
+              Coming Soon
+            </span>
+          </div>
+
+          <h2 className="text-xl sm:text-2xl font-bold text-on-surface mt-3">
+            Smarter business matching
+          </h2>
+
+          <p className="text-sm text-on-surface-variant leading-relaxed mt-2 max-w-xl">
+            NJS is working towards intelligent business matchmaking that helps
+            you discover relevant suppliers, manufacturers, partners, and
+            customers based on your business goals.
+          </p>
+        </div>
+
+        <div className="shrink-0">
+          <span className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-lowest px-5 py-3 text-sm font-semibold text-on-surface-variant">
+            <span className="material-symbols-outlined text-lg">
+              psychology
+            </span>
+            AI matching — Coming Soon
+          </span>
+        </div>
+      </section>
+    </div>
+  );
+};
+
+export default DiscoverPage;
+
