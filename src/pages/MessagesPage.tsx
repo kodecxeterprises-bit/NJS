@@ -76,9 +76,10 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
 
-  const fetchConversations = useCallback(async () => {
+  const fetchConversations = useCallback(async (showLoader = true) => {
     if (!user?.id) return;
-    setIsLoadingConversations(true); setLoadError('');
+    if (showLoader) setIsLoadingConversations(true);
+    setLoadError('');
     try {
       const connectionResponse = await apiFetch('/api/connections');
       const acceptedConnections = (connectionResponse.connections ?? []).filter((item: any) => item.status === 'accepted');
@@ -115,7 +116,9 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
       setActiveConversationId((current) => current && mapped.some((item) => item.id === current) ? current : mapped[0]?.id ?? null);
     } catch (error: any) {
       console.error('Conversation loading failed:', error); setLoadError(error.message || 'Could not load your conversations.');
-    } finally { setIsLoadingConversations(false); }
+    } finally {
+      if (showLoader) setIsLoadingConversations(false);
+    }
   }, [user?.id, businessProfile?.id, apiFetch]);
 
   const fetchMessages = useCallback(async (conversationId: string) => {
@@ -137,10 +140,13 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavigate }) => {
   useEffect(() => { if (activeConversationId) void fetchMessages(activeConversationId); else setMessages([]); }, [activeConversationId, fetchMessages]);
 
   // Keep sidebar unread totals fresh for messages arriving in ANY conversation.
+  // This is a background refresh: do not replace the open messaging UI with a loader.
   useEffect(() => {
     if (!user?.id) return;
     const channel = supabase.channel(`njs-unread:${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => { void fetchConversations(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        void fetchConversations(false);
+      })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [user?.id, fetchConversations]);
