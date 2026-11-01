@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -17,16 +18,19 @@ export const SignInPage: React.FC<SignInPageProps> = ({ onNavigate, onSignedIn }
   const handleGoogleSignIn = async () => {
     setError(null);
     setIsGoogleLoading(true);
+
     try {
       const res = await signInWithGoogle();
-      if (res.success) {
-        onSignedIn();
-      } else {
+
+      // OAuth redirects the browser away from this page.
+      // Do not navigate before Google authentication has completed.
+      // The authenticated-user redirect in App.tsx handles the return.
+      if (!res.success) {
         setError(res.error || 'Failed to sign in with Google.');
+        setIsGoogleLoading(false);
       }
     } catch (err: any) {
       setError(err.message || 'Google sign-in was cancelled or encountered an error.');
-    } finally {
       setIsGoogleLoading(false);
     }
   };
