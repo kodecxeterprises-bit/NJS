@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { AppLayout } from './components/layout/AppLayout';
+import { supabase } from './lib/supabase';
 
 // Public Pages
 import { LandingPage } from './pages/LandingPage';
@@ -50,6 +51,52 @@ const MainAppContent: React.FC = () => {
   const [navigationState, setNavigationState] = useState<any>(null);
   const [verificationCodePreview, setVerificationCodePreview] = useState<string | undefined>();
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+// Keep the sidebar unread badge updated in real time.
+useEffect(() => {
+  if (!user?.id) {
+    setUnreadNotifications(0);
+    return;
+  }
+
+  let active = true;
+
+  const refreshUnreadCount = async () => {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('is_read', false);
+
+    if (!error && active) {
+      setUnreadNotifications(count || 0);
+    } else if (error) {
+      console.error('Unable to refresh notification count:', error);
+    }
+  };
+
+  void refreshUnreadCount();
+
+  const channel = supabase
+    .channel(`notifications-badge-${user.id}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
+      },
+      () => {
+        void refreshUnreadCount();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    active = false;
+    void supabase.removeChannel(channel);
+  };
+}, [user?.id]);
 
   // Sync with browser back/forward buttons
   useEffect(() => {
