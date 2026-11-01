@@ -43,7 +43,9 @@ function getItemLabel(item: unknown): string {
 
   if (item && typeof item === 'object') {
     const value = item as Record<string, unknown>;
-    return String(value.name ?? value.title ?? value.label ?? value.category ?? '');
+    return String(
+      value.name ?? value.title ?? value.label ?? value.category ?? ''
+    );
   }
 
   return '';
@@ -60,19 +62,22 @@ function getTags(items: unknown[], limit = 4): string[] {
 }
 
 function getInitials(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('') || 'B';
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .join('') || 'B'
+  );
 }
 
 export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
   const { apiFetch } = useAuth();
 
   const [businesses, setBusinesses] = useState<DiscoverBusiness[]>([]);
-  const [pagination, setPagination] = useState<Pagination>(EMPTY_PAGINATION);
+  const [pagination, setPagination] =
+    useState<Pagination>(EMPTY_PAGINATION);
 
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -111,7 +116,11 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
       setPagination(response.pagination ?? EMPTY_PAGINATION);
     } catch (err: any) {
       console.error('Business discovery failed:', err);
-      setError(err.message || 'We could not load businesses. Please try again.');
+
+      setError(
+        err.message || 'We could not load businesses. Please try again.'
+      );
+
       setBusinesses([]);
       setPagination(EMPTY_PAGINATION);
     } finally {
@@ -132,6 +141,21 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
     void fetchBusinesses();
   }, [fetchBusinesses]);
 
+  const submitSearch = (event?: React.FormEvent) => {
+    event?.preventDefault();
+
+    const query = searchInput.trim();
+
+    setPage(1);
+
+    if (query === searchQuery && page === 1) {
+      void fetchBusinesses();
+      return;
+    }
+
+    setSearchQuery(query);
+  };
+
   const resetFilters = () => {
     setSearchInput('');
     setSearchQuery('');
@@ -143,14 +167,13 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
     setPage(1);
   };
 
-  const submitSearch = (event: React.FormEvent) => {
-    event.preventDefault();
-    setPage(1);
-    setSearchQuery(searchInput.trim());
-  };
-
   const hasFilters = Boolean(
-    searchQuery || industry || businessType || location || offering || verification
+    searchQuery ||
+      industry ||
+      businessType ||
+      location ||
+      offering ||
+      verification
   );
 
   return (
@@ -177,14 +200,19 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
           onClick={() => onNavigate('profile')}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-semibold hover:opacity-90 transition-opacity"
         >
-          <span className="material-symbols-outlined text-lg">add_business</span>
+          <span className="material-symbols-outlined text-lg">
+            add_business
+          </span>
           List your business
         </button>
       </section>
 
       {/* Search and filters */}
       <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-4 sm:p-6 shadow-xs">
-        <form onSubmit={submitSearch} className="flex flex-col sm:flex-row gap-3">
+        <form
+          onSubmit={submitSearch}
+          className="flex flex-col sm:flex-row gap-3"
+        >
           <div className="relative flex-1">
             <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant">
               search
@@ -200,10 +228,12 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
           </div>
 
           <button
-            type="submit"
-            className="rounded-xl bg-primary px-7 py-3.5 text-sm font-semibold text-on-primary hover:opacity-90 transition-opacity"
+            type="button"
+            onClick={() => submitSearch()}
+            disabled={isLoading}
+            className="rounded-xl bg-primary px-7 py-3.5 text-sm font-semibold text-on-primary hover:opacity-90 transition-opacity disabled:opacity-50"
           >
-            Search
+            {isLoading ? 'Searching...' : 'Search'}
           </button>
         </form>
 
@@ -212,6 +242,7 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             <span className="text-xs font-semibold text-on-surface-variant">
               Industry
             </span>
+
             <input
               value={industry}
               onChange={(event) => {
@@ -227,6 +258,7 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             <span className="text-xs font-semibold text-on-surface-variant">
               Business type
             </span>
+
             <select
               value={businessType}
               onChange={(event) => {
@@ -249,6 +281,7 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             <span className="text-xs font-semibold text-on-surface-variant">
               Location
             </span>
+
             <input
               value={location}
               onChange={(event) => {
@@ -264,6 +297,7 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             <span className="text-xs font-semibold text-on-surface-variant">
               Products or services
             </span>
+
             <input
               value={offering}
               onChange={(event) => {
@@ -279,6 +313,7 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             <span className="text-xs font-semibold text-on-surface-variant">
               Verification
             </span>
+
             <select
               value={verification}
               onChange={(event) => {
@@ -313,10 +348,13 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
           <h2 className="text-lg font-bold text-on-surface">
             Business directory
           </h2>
+
           <p className="text-sm text-on-surface-variant mt-1">
             {isLoading
               ? 'Finding businesses...'
-              : `${pagination.total} ${pagination.total === 1 ? 'business' : 'businesses'} found`}
+              : `${pagination.total} ${
+                  pagination.total === 1 ? 'business' : 'businesses'
+                } found`}
           </p>
         </div>
 
@@ -341,11 +379,13 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             >
               <div className="flex gap-4">
                 <div className="w-14 h-14 rounded-2xl bg-surface-container-high" />
+
                 <div className="flex-1 space-y-3">
                   <div className="h-4 w-2/3 rounded bg-surface-container-high" />
                   <div className="h-3 w-1/3 rounded bg-surface-container-high" />
                 </div>
               </div>
+
               <div className="h-3 w-full rounded bg-surface-container-high mt-6" />
               <div className="h-3 w-4/5 rounded bg-surface-container-high mt-3" />
             </div>
@@ -359,10 +399,13 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
           <span className="material-symbols-outlined text-3xl text-red-500">
             cloud_off
           </span>
+
           <h3 className="text-lg font-bold text-on-surface mt-3">
             Couldn't load the directory
           </h3>
+
           <p className="text-sm text-on-surface-variant mt-2">{error}</p>
+
           <button
             type="button"
             onClick={() => void fetchBusinesses()}
@@ -429,7 +472,10 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
                       <span className="material-symbols-outlined text-base">
                         location_on
                       </span>
-                      {[business.city, business.country].filter(Boolean).join(', ')}
+
+                      {[business.city, business.country]
+                        .filter(Boolean)
+                        .join(', ')}
                     </span>
                   )}
 
@@ -524,7 +570,9 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             <button
               type="button"
               disabled={page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              onClick={() =>
+                setPage((current) => Math.max(1, current - 1))
+              }
               className="rounded-xl border border-outline-variant/40 px-4 py-2 text-sm font-semibold text-on-surface disabled:opacity-40"
             >
               Previous
@@ -549,6 +597,7 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
             <span className="material-symbols-outlined text-xl">
               auto_awesome
             </span>
+
             <span className="text-xs font-bold uppercase tracking-[0.15em]">
               Coming Soon
             </span>
@@ -579,4 +628,3 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({ onNavigate }) => {
 };
 
 export default DiscoverPage;
-          
