@@ -1,4 +1,3 @@
-
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
@@ -145,9 +144,7 @@ interface AdminDashboardPageProps {
   onNavigate: (path: string) => void;
 }
 
-export default function AdminDashboardPage({
-  onNavigate,
-}: AdminDashboardPageProps) {
+export default function AdminDashboardPage({ onNavigate }: AdminDashboardPageProps) {
   const auth = useAuth() as any;
   const apiFetch = auth.apiFetch;
   const signOut = auth.signOut;
@@ -156,14 +153,12 @@ export default function AdminDashboardPage({
   const [activeSection, setActiveSection] = useState<Section>("Overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [authorized, setAuthorized] = useState<boolean | null>(null);
-
   const [stats, setStats] = useState<OverviewStats>(emptyStats);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [replies, setReplies] = useState<Reply[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [replyMessage, setReplyMessage] = useState("");
-
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [userSearch, setUserSearch] = useState("");
@@ -171,7 +166,6 @@ export default function AdminDashboardPage({
   const [ticketSearch, setTicketSearch] = useState("");
   const [userPage, setUserPage] = useState(1);
   const [businessPage, setBusinessPage] = useState(1);
-
   const [loading, setLoading] = useState(false);
   const [ticketLoading, setTicketLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -181,21 +175,17 @@ export default function AdminDashboardPage({
 
   const request = useCallback(async (url: string, options?: RequestInit) => {
     if (apiFetch) return apiFetch(url, options);
-
     throw new Error("Your authenticated API connection is unavailable.");
   }, [apiFetch]);
 
   const handleError = (err: any) => {
     const message = err?.message || "Something went wrong.";
     setError(message);
-
     if (
       message.toLowerCase().includes("admin") ||
       message.includes("403") ||
       message.includes("401")
-    ) {
-      setAuthorized(false);
-    }
+    ) setAuthorized(false);
   };
 
   const loadOverview = useCallback(async () => {
@@ -208,7 +198,6 @@ export default function AdminDashboardPage({
     const query = statusFilter === "all"
       ? ""
       : `?status=${encodeURIComponent(statusFilter)}`;
-
     const data = await request(`/api/admin/support${query}`);
     const rows = Array.isArray(data) ? data : data.tickets || data.data || [];
     setTickets(rows);
@@ -266,7 +255,6 @@ export default function AdminDashboardPage({
     setTicketLoading(true);
     setReplies([]);
     setError("");
-
     try {
       const data = await request(
         `/api/admin/support?ticketId=${encodeURIComponent(ticket.id)}`
@@ -285,7 +273,6 @@ export default function AdminDashboardPage({
     setSending(true);
     setError("");
     setNotice("");
-
     try {
       await request("/api/admin/support", {
         method: "POST",
@@ -310,7 +297,6 @@ export default function AdminDashboardPage({
     if (!selectedTicket) return;
     setError("");
     setNotice("");
-
     try {
       await request("/api/admin/support", {
         method: "POST",
@@ -353,15 +339,10 @@ export default function AdminDashboardPage({
     setActionLoading(target.id);
     setError("");
     setNotice("");
-
     try {
       const data = await request("/api/admin/users", {
         method: "POST",
-        body: JSON.stringify({
-          userId: target.id,
-          action,
-          duration,
-        }),
+        body: JSON.stringify({ userId: target.id, action, duration }),
       });
       setNotice(data.message || "User updated.");
       await loadUsers();
@@ -379,7 +360,6 @@ export default function AdminDashboardPage({
     setActionLoading(business.id);
     setError("");
     setNotice("");
-
     try {
       const data = await request("/api/admin/businesses", {
         method: "POST",
@@ -528,63 +508,38 @@ export default function AdminDashboardPage({
       </aside>
 
       <main className="flex-1 min-w-0">
-        
-<header className="sticky top-0 z-20 min-h-16 bg-[#09090f]/90 backdrop-blur-xl border-b border-white/5 flex items-center justify-between gap-3 px-4 sm:px-5 lg:px-8 py-2">
-  <div className="flex items-center gap-3 min-w-0">
-    <button
-      className="lg:hidden text-zinc-400 shrink-0"
-      onClick={() => setSidebarOpen(true)}
-      aria-label="Open navigation"
-    >
-      <span className="material-symbols-outlined">menu</span>
-    </button>
-
-    <div className="min-w-0">
-      <h2 className="font-semibold truncate">{activeSection}</h2>
-      <p className="text-[11px] text-zinc-500 truncate">
-        NJS Platform / {activeSection}
-      </p>
-    </div>
-  </div>
-
-  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-    <button
-      onClick={() => onNavigate("dashboard")}
-      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-sm transition-colors"
-      title="Return to NJS"
-    >
-      <span className="material-symbols-outlined text-lg">arrow_back</span>
-      <span className="hidden sm:inline">Back to NJS</span>
-    </button>
-
-    <button
-      onClick={refreshCurrent}
-      className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"
-      title="Refresh"
-    >
-      <span className="material-symbols-outlined text-zinc-400">
-        refresh
-      </span>
-    </button>
-
-    <div className="w-2 h-2 rounded-full bg-emerald-400" />
-    <span className="text-xs text-zinc-400 hidden sm:block">
-      Control centre
-    </span>
-  </div>
-</header>
-
-          <div className="flex items-center gap-3">
-            <button className="lg:hidden text-zinc-400" onClick={() => setSidebarOpen(true)}>
+        {/* There is deliberately only ONE dashboard header here. */}
+        <header className="sticky top-0 z-20 min-h-16 bg-[#09090f]/90 backdrop-blur-xl border-b border-white/5 flex items-center justify-between gap-3 px-4 sm:px-5 lg:px-8 py-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              className="lg:hidden text-zinc-400 shrink-0"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open navigation"
+            >
               <span className="material-symbols-outlined">menu</span>
             </button>
-            <div>
-              <h2 className="font-semibold">{activeSection}</h2>
-              <p className="text-[11px] text-zinc-500">NJS Platform / {activeSection}</p>
+            <div className="min-w-0">
+              <h2 className="font-semibold truncate">{activeSection}</h2>
+              <p className="text-[11px] text-zinc-500 truncate">
+                NJS Platform / {activeSection}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={refreshCurrent} className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center" title="Refresh">
+
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <button
+              onClick={() => onNavigate("dashboard")}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-sm transition-colors"
+              title="Return to NJS"
+            >
+              <span className="material-symbols-outlined text-lg">arrow_back</span>
+              <span className="hidden sm:inline">Back to NJS</span>
+            </button>
+            <button
+              onClick={refreshCurrent}
+              className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"
+              title="Refresh"
+            >
               <span className="material-symbols-outlined text-zinc-400">refresh</span>
             </button>
             <div className="w-2 h-2 rounded-full bg-emerald-400" />
@@ -605,7 +560,6 @@ export default function AdminDashboardPage({
               <button onClick={() => setNotice("")}>✕</button>
             </div>
           )}
-
           {loading && (
             <p className="text-sm text-zinc-500 mb-4">Loading live platform data...</p>
           )}
@@ -614,7 +568,9 @@ export default function AdminDashboardPage({
             <div className="space-y-8">
               <div>
                 <p className="text-indigo-400 text-sm font-medium">PLATFORM OVERVIEW</p>
-                <h1 className="text-3xl font-bold mt-2">Welcome back, {user?.name?.split(" ")[0] || "Admin"} 👋</h1>
+                <h1 className="text-3xl font-bold mt-2">
+                  Welcome back, {user?.name?.split(" ")[0] || "Admin"} 👋
+                </h1>
                 <p className="text-zinc-500 mt-2">Live statistics from your NJS platform.</p>
               </div>
 
@@ -867,7 +823,11 @@ export default function AdminDashboardPage({
                                     : "bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
                                 }`}
                               >
-                                {actionLoading === business.id ? "Please wait..." : business.is_verified ? "Remove verification" : "Verify business"}
+                                                                  {actionLoading === business.id
+                                    ? "Please wait..."
+                                    : business.is_verified
+                                      ? "Remove verification"
+                                      : "Verify business"}
                               </button>
                             </td>
                           </tr>
@@ -896,9 +856,7 @@ export default function AdminDashboardPage({
                 </button>
               </div>
             </section>
-          )}
-
-          {activeSection === "Support Inbox" && (
+          )}          {activeSection === "Support Inbox" && (
             <section className="space-y-5">
               <div>
                 <h1 className="text-2xl font-bold">Support inbox</h1>
@@ -985,7 +943,7 @@ export default function AdminDashboardPage({
                       <p className="text-sm text-zinc-500 mt-1">Ticket details and replies will appear here.</p>
                     </div>
                   ) : (
-                     <>
+                    <>
                       <div className="p-5 border-b border-white/5">
                         <div className="flex flex-col sm:flex-row sm:justify-between gap-4">
                           <div className="min-w-0">
@@ -1008,7 +966,6 @@ export default function AdminDashboardPage({
                                 <option key={value} value={value}>{label}</option>
                               ))}
                             </select>
-
                             <select
                               value={selectedTicket.priority}
                               onChange={(event) => updateTicket("priority", event.target.value)}
@@ -1035,7 +992,6 @@ export default function AdminDashboardPage({
                         <h4 className="text-xs uppercase tracking-wider text-zinc-500">
                           Conversation
                         </h4>
-
                         {ticketLoading ? (
                           <p className="text-sm text-zinc-500">Loading replies...</p>
                         ) : replies.length === 0 ? (
@@ -1067,7 +1023,6 @@ export default function AdminDashboardPage({
                           placeholder="Write a reply to this user..."
                           className="w-full bg-[#09090f] border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500 resize-y"
                         />
-
                         <div className="flex justify-end mt-3">
                           <button
                             onClick={sendReply}
