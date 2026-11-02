@@ -290,6 +290,7 @@ useEffect(() => {
       {currentPath === 'ai-lead-generator' && <AiLeadGeneratorPage onNavigate={navigate} />}
       {currentPath === 'ai-outreach' && <AiLeadGeneratorPage onNavigate={navigate} />}
       {currentPath === 'notifications' && <NotificationsPage onNavigate={navigate} />}
+{currentPath === 'contact' && <ContactPage onNavigate={navigate} />}
       {currentPath === 'profile' && <ProfilePage onNavigate={navigate} />}
       {currentPath === 'settings' && <SettingsPage onNavigate={navigate} />}
       {currentPath === 'billing' && <SettingsPage onNavigate={navigate} initialTab="billing" />}
