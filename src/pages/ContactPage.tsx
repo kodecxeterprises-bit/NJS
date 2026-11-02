@@ -185,6 +185,6 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       </div>
     </main>
   );
-
+);
 
       
