@@ -2,6 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 
 import {
   handleCreateSupportTicket,
+  handleCustomerSupportTickets,
+  handleCustomerSupportTicket,
+  handleCustomerSupportReply,
   handleAdminSupportGet,
   handleAdminSupportPost,
 } from "./support-routes";
