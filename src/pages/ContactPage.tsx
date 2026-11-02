@@ -187,9 +187,4 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   );
 
 
-      <footer className="border-t border-outline-variant/30 py-6 text-center text-xs text-on-surface-variant">
-        © 2026 NJS Platform. All rights reserved.
-      </footer>
-    </div>
-  );
-};
+      
