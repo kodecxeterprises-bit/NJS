@@ -183,8 +183,8 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
           </form>
         )}
       </div>
-    </main>
+        </main>
   );
-);
+};
 
       
