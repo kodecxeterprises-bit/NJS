@@ -236,22 +236,23 @@ useEffect(() => {
   }
 
   // 4. Authenticated Application Routes (Protected via AppLayout)
-  const isAuthRoute = [
-    'dashboard',
-    'discover',
-    'ai-matches',
-    'what-i-need',
-    'opportunities',
-    'connections',
-    'messages',
-    'saved-leads',
-    'ai-lead-generator',
-    'ai-outreach',
-    'notifications',
-    'profile',
-    'settings',
-    'billing',
-  ].includes(currentPath);
+ const isAuthRoute = [
+  'dashboard',
+  'discover',
+  'ai-matches',
+  'what-i-need',
+  'opportunities',
+  'connections',
+  'messages',
+  'saved-leads',
+  'ai-lead-generator',
+  'ai-outreach',
+  'notifications',
+  'profile',
+  'settings',
+  'billing',
+  'contact',
+].includes(currentPath);
 
   // If user is not authenticated and attempts to enter an app screen, redirect to sign-in or permit demo view
   if (isAuthRoute && !user) {
