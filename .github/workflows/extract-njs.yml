@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+          persist-credentials: true
 
       - name: Install extraction tools
         run: |
@@ -32,49 +33,37 @@ jobs:
           PROJECT_DIR="$EXTRACT_DIR/NJS"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: NJS.zip not found in repository root."
-            ls -la
+            echo "ERROR: NJS.zip not found."
             exit 1
           fi
 
-          echo "Backing up ZIP archive..."
           cp "$ZIP" "$SAFE_ZIP"
 
-          echo "Validating archive..."
           unzip -t "$SAFE_ZIP"
-
           mkdir -p "$EXTRACT_DIR"
-
-          echo "Extracting project..."
           unzip -o -q "$SAFE_ZIP" -d "$EXTRACT_DIR"
 
           if [ ! -f "$PROJECT_DIR/package.json" ]; then
-            echo "ERROR: Extracted project is incomplete."
-            find "$EXTRACT_DIR" -maxdepth 3 -type f
+            echo "ERROR: Invalid NJS project archive."
             exit 1
           fi
 
-          echo "Project validated."
-
-          echo "Replacing repository contents..."
+          echo "Replacing project files..."
 
           rsync -a --delete \
             --exclude='.git/' \
+            --exclude='.github/' \
             --exclude='node_modules/' \
             "$PROJECT_DIR/" ./
 
-          echo "Removing original ZIP..."
           rm -f "$ZIP"
 
-          echo "Extraction completed successfully!"
-
-          echo "Checking important files..."
           test -f package.json
           test -f src/App.tsx
           test -f cloudflare/worker.ts
           test -f cloudflare/support-routes.ts
 
-          echo "All required files are present."
+          echo "NJS extraction completed successfully."
 
       - name: Commit extracted project
         run: |
