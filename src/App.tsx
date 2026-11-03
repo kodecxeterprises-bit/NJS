@@ -163,7 +163,9 @@ useEffect(() => {
   if (currentPath === 'pricing') {
     return <PricingPage onNavigate={navigate} />;
   }
-  if (currentPath === 'contact') {
+  // Visitors retain the public contact experience. Signed-in users are
+  // routed through the authenticated application shell below.
+  if (currentPath === 'contact' && !user) {
     return <ContactPage onNavigate={navigate} />;
   }
   if (currentPath === 'privacy' || currentPath === 'privacy-policy') {

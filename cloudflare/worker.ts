@@ -819,9 +819,38 @@ export default {
         return await handleConnectionRespond(request, env);
       }
 
-      // Public support ticket submission
+      // Customer Support Desk: ticket creation, inbox, conversation and replies.
+      // Keep the collection route ahead of the parameterized ticket routes.
       if (url.pathname === "/api/support/tickets") {
-        return await handleCreateSupportTicket(request, env);
+        if (request.method === "POST") {
+          return await handleCreateSupportTicket(request, env);
+        }
+
+        if (request.method === "GET") {
+          return await handleCustomerSupportTickets(request, env);
+        }
+
+        return json({ error: "Method not allowed." }, 405);
+      }
+
+      const supportTicketMatch = url.pathname.match(
+        /^\/api\/support\/tickets\/([^/]+)(\/replies)?$/
+      );
+
+      if (supportTicketMatch) {
+        let ticketId: string;
+
+        try {
+          ticketId = decodeURIComponent(supportTicketMatch[1]);
+        } catch {
+          return json({ error: "Invalid ticket ID." }, 400);
+        }
+
+        if (supportTicketMatch[2]) {
+          return await handleCustomerSupportReply(request, env, ticketId);
+        }
+
+        return await handleCustomerSupportTicket(request, env, ticketId);
       }
       // Admin dashboard overview
       if (url.pathname === "/api/admin/overview") {
