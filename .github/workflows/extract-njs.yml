@@ -17,40 +17,71 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
-      - name: Extract NJS messaging updates
+      - name: Set up extraction environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip rsync
+
+      - name: Validate and extract NJS project
         run: |
           ZIP="NJS.zip"
+          EXTRACT_DIR="/tmp/njs-extracted"
 
           if [ ! -f "$ZIP" ]; then
-            echo "$ZIP was not found in the repository root."
+            echo "ERROR: $ZIP was not found in the repository root."
             ls -la
             exit 1
           fi
 
-          mkdir -p /tmp/njs-messaging
-          unzip -o -q "$ZIP" -d /tmp/njs-messaging
+          echo "Checking ZIP archive..."
+          unzip -t "$ZIP"
 
-          mkdir -p src/pages src/types
+          mkdir -p "$EXTRACT_DIR"
 
-          cp /tmp/njs-messaging/njs-messaging-update/MessagesPage.tsx src/pages/MessagesPage.tsx
-          cp /tmp/njs-messaging/njs-messaging-update/index.ts src/types/index.ts
+          echo "Extracting complete NJS project..."
+          unzip -o -q "$ZIP" -d "$EXTRACT_DIR"
+
+          PROJECT_DIR="$EXTRACT_DIR/NJS"
+
+          if [ ! -d "$PROJECT_DIR" ]; then
+            echo "ERROR: Expected NJS project folder was not found."
+            find "$EXTRACT_DIR" -maxdepth 3 -type f | head -100
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/package.json" ]; then
+            echo "ERROR: package.json is missing from extracted project."
+            exit 1
+          fi
+
+          echo "Project structure validated successfully."
+
+          echo "Replacing repository files..."
+
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='node_modules/' \
+            "$PROJECT_DIR/" ./
 
           rm "$ZIP"
 
-          echo "Messaging files extracted successfully."
-          ls -l src/pages/MessagesPage.tsx src/types/index.ts
+          echo "NJS project extracted successfully."
 
-      - name: Commit extracted files
+          echo "Updated project files:"
+          ls -la
+          ls -la src/pages
+          ls -la cloudflare
+
+      - name: Commit extracted project
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add src/pages/MessagesPage.tsx src/types/index.ts
-          git add -u
+          git add -A
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Update NJS messaging features"
+            git commit -m "Update complete NJS project"
             git push origin HEAD:${{ github.ref_name }}
           fi
