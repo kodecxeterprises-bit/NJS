@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -8,7 +8,7 @@ interface SettingsPageProps {
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate, initialTab = 'account' }) => {
-  const { user, businessProfile, subscription, signOut, hasGoogleAuth, signInWithGoogle } = useAuth();
+  const { user, businessProfile, subscription, signOut, hasGoogleAuth, signInWithGoogle, apiFetch, refreshUser } = useAuth();
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -19,6 +19,32 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate, initialT
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [googleStatusMsg, setGoogleStatusMsg] = useState<string | null>(null);
+  const [billingDetails, setBillingDetails] = useState<any>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'billing' || !user) return;
+    let cancelled = false;
+    apiFetch('/api/billing/subscription')
+      .then((result) => { if (!cancelled) setBillingDetails(result.subscription ?? null); })
+      .catch((error) => { if (!cancelled) setBillingError(error instanceof Error ? error.message : 'Could not load billing details.'); });
+    return () => { cancelled = true; };
+  }, [activeTab, apiFetch, user]);
+
+  const manageBilling = async (action: 'cancel' | 'resume') => {
+    setBillingBusy(true);
+    setBillingError(null);
+    try {
+      const result = await apiFetch(`/api/billing/${action}`, { method: 'POST' });
+      setBillingDetails((current: any) => current ? { ...current, ...result.subscription } : current);
+      await refreshUser();
+    } catch (error) {
+      setBillingError(error instanceof Error ? error.message : 'Could not update your subscription.');
+    } finally {
+      setBillingBusy(false);
+    }
+  };
 
   const handleConnectGoogle = async () => {
     setGoogleConnecting(true);
@@ -234,68 +260,32 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate, initialT
               <div>
                 <h2 className="text-xl font-bold text-on-surface">Subscription Plans &amp; Usage</h2>
                 <p className="text-xs sm:text-sm text-on-surface-variant">
-                  Current plan: <strong className="text-primary uppercase font-bold">Free Tier</strong> (4,850 credits remaining)
+                  Current plan: <strong className="text-primary uppercase font-bold">{subscription?.plan === 'business' ? 'Enterprise' : subscription?.plan ?? 'free'}</strong>
+                  {` · ${subscription?.creditsAvailable ?? 4850} credits remaining`}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-5 rounded-2xl border-2 border-primary bg-surface-container-low relative flex flex-col justify-between">
-                  <span className="px-2 py-0.5 rounded bg-primary text-on-primary text-[10px] font-bold uppercase w-fit mb-2">
-                    Current
-                  </span>
-                  <div>
-                    <h3 className="font-bold text-base text-on-surface">Free</h3>
-                    <p className="text-xs text-on-surface-variant mt-1">For exploratory matchmaking</p>
-                    <ul className="text-xs space-y-1.5 mt-3 text-on-surface">
-                      <li>✓ 5 AI briefs / month</li>
-                      <li>✓ Unlimited directory browsing</li>
-                      <li>✓ Direct messaging on connect</li>
-                    </ul>
-                  </div>
-                  <div className="mt-4 pt-3 border-t border-outline-variant/20">
-                    <span className="text-xs font-bold text-primary">Active</span>
-                  </div>
-                </div>
-
-                <div className="p-5 rounded-2xl border border-outline-variant/30 bg-surface flex flex-col justify-between">
-                  <div>
-                    <span className="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px] font-bold uppercase w-fit block mb-2">
-                      Coming Soon
-                    </span>
-                    <h3 className="font-bold text-base text-on-surface">Pro Sourcing</h3>
-                    <p className="text-xs text-on-surface-variant mt-1">For active procurement teams</p>
-                    <ul className="text-xs space-y-1.5 mt-3 text-on-surface">
-                      <li>✓ 50 AI briefs / month</li>
-                      <li>✓ Priority neural matching</li>
-                      <li>✓ Autonomous lead crawler</li>
-                    </ul>
-                  </div>
-                  <div className="mt-4 pt-3 border-t border-outline-variant/20">
-                    <button disabled className="w-full py-2 rounded-lg bg-surface-container text-xs font-medium text-on-surface-variant">
-                      Coming Soon
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-5 rounded-2xl border border-outline-variant/30 bg-surface flex flex-col justify-between">
-                  <div>
-                    <span className="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px] font-bold uppercase w-fit block mb-2">
-                      Coming Soon
-                    </span>
-                    <h3 className="font-bold text-base text-on-surface">Enterprise Custom</h3>
-                    <p className="text-xs text-on-surface-variant mt-1">Unlimited scale &amp; dedicated agents</p>
-                    <ul className="text-xs space-y-1.5 mt-3 text-on-surface">
-                      <li>✓ Unlimited AI brief routing</li>
-                      <li>✓ Multi-channel outreach queue</li>
-                      <li>✓ Dedicated account director</li>
-                    </ul>
-                  </div>
-                  <div className="mt-4 pt-3 border-t border-outline-variant/20">
-                    <button disabled className="w-full py-2 rounded-lg bg-surface-container text-xs font-medium text-on-surface-variant">
-                      Coming Soon
-                    </button>
-                  </div>
-                </div>
+              {billingError && <p role="alert" className="rounded-xl bg-error-container p-4 text-sm text-on-error-container">{billingError}</p>}
+              <div className="rounded-2xl border border-outline-variant/30 bg-surface p-5 space-y-3">
+                <h3 className="font-bold text-on-surface">Billing status</h3>
+                <p className="text-sm text-on-surface-variant">
+                  {billingDetails ? `${billingDetails.plan === 'business' ? 'Enterprise' : billingDetails.plan} · ${billingDetails.status.replace('_', ' ')}` : 'Free plan'}
+                  {billingDetails?.billingInterval ? ` · ${billingDetails.billingInterval}` : ''}
+                  {billingDetails?.amountKobo ? ` · ${new Intl.NumberFormat('en-NG', { style: 'currency', currency: billingDetails.currency || 'NGN', maximumFractionDigits: 0 }).format(billingDetails.amountKobo / 100)}` : ''}
+                </p>
+                {billingDetails?.currentPeriodEnd && <p className="text-sm text-on-surface-variant">{billingDetails.cancelAtPeriodEnd ? 'Access ends' : 'Next renewal'}: {new Date(billingDetails.currentPeriodEnd).toLocaleDateString()}</p>}
+                {billingDetails?.latestPayment && <div className="text-sm text-on-surface-variant">
+                  <p>Latest payment: {new Intl.NumberFormat('en-NG', { style: 'currency', currency: billingDetails.latestPayment.currency || 'NGN', maximumFractionDigits: 0 }).format(billingDetails.latestPayment.amountKobo / 100)} · {billingDetails.latestPayment.status}</p>
+                  <p>Reference: <span className="font-mono">{billingDetails.latestPayment.reference}</span>{billingDetails.latestPayment.paidAt ? ` · ${new Date(billingDetails.latestPayment.paidAt).toLocaleDateString()}` : ''}</p>
+                </div>}
+                {(billingDetails?.status === 'active' || billingDetails?.status === 'non_renewing' || billingDetails?.status === 'past_due') && <button onClick={() => void manageBilling(billingDetails.cancelAtPeriodEnd ? 'resume' : 'cancel')} disabled={billingBusy} className="px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-semibold disabled:opacity-60">
+                  {billingBusy ? 'Updating…' : billingDetails.cancelAtPeriodEnd ? 'Resume subscription' : 'Cancel at period end'}
+                </button>}
+                {!billingDetails && <p className="text-xs text-on-surface-variant">Your existing free-tier credit display is preserved. Paid-plan entitlements are not applied by this billing setup.</p>}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button onClick={() => onNavigate('pricing')} className="px-5 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-semibold">View plans</button>
+                <button onClick={() => void apiFetch('/api/billing/subscription').then((result) => setBillingDetails(result.subscription ?? null)).catch((error) => setBillingError(error.message))} className="px-5 py-2.5 rounded-xl bg-surface-container-high text-sm font-semibold">Refresh billing</button>
               </div>
             </div>
           )}

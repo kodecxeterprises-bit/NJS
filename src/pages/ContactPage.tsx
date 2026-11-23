@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { clearSupportIdempotencyKey, getSupportIdempotencyKey } from "../lib/supportIdempotency";
 
 interface ContactPageProps {
   onNavigate: (path: string) => void;
@@ -84,6 +85,10 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [creatingTicket, setCreatingTicket] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
+  const [createSyncPending, setCreateSyncPending] = useState(false);
+  const [replySyncPending, setReplySyncPending] = useState(false);
+  const createInFlight = useRef(false);
+  const replyInFlight = useRef(false);
 
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
@@ -216,24 +221,40 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   const createTicket = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
+    if (createInFlight.current) return;
+
     if (!subject.trim() || message.trim().length < 10) {
       setError("Please provide a subject and describe your issue in at least 10 characters.");
       return;
     }
 
+    createInFlight.current = true;
     setCreatingTicket(true);
     setError("");
     setNotice("");
 
     try {
+      const payload = {
+        subject: subject.trim(),
+        category,
+        message: message.trim(),
+      };
+      const keyScope = `njs-support:create:${user!.id}`;
+      const idempotencyKey = await getSupportIdempotencyKey(keyScope, JSON.stringify(payload));
       const data = await apiFetch("/api/support/tickets", {
         method: "POST",
-        body: JSON.stringify({
-          subject: subject.trim(),
-          category,
-          message: message.trim(),
-        }),
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(payload),
       });
+
+      if (data.ticketCreated && !data.timestampSynced) {
+        setCreateSyncPending(true);
+        setNotice(data.message || "Ticket saved; timestamp synchronization is pending. Retry to finish.");
+        return;
+      }
+
+      clearSupportIdempotencyKey(keyScope, idempotencyKey);
+      setCreateSyncPending(false);
 
       setSubject("");
       setMessage("");
@@ -262,12 +283,15 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
           : "Your support ticket could not be created."
       );
     } finally {
+      createInFlight.current = false;
       setCreatingTicket(false);
     }
   };
 
   const sendReply = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (replyInFlight.current) return;
 
     if (!selectedTicket || !replyMessage.trim()) return;
 
@@ -276,27 +300,40 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       return;
     }
 
+    replyInFlight.current = true;
     setSendingReply(true);
     setError("");
     setNotice("");
 
     try {
+      const payload = { message: replyMessage.trim() };
+      const keyScope = `njs-support:reply:${user!.id}:${selectedTicket.id}`;
+      const idempotencyKey = await getSupportIdempotencyKey(keyScope, JSON.stringify(payload));
       await apiFetch(
         `/api/support/tickets/${encodeURIComponent(selectedTicket.id)}/replies`,
         {
           method: "POST",
-          body: JSON.stringify({ message: replyMessage.trim() }),
+          headers: { "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify(payload),
         }
-      );
-
-      setReplyMessage("");
-      await loadConversation(selectedTicket);
-      await loadTickets();
+      ).then(async (result) => {
+        if (result.replySaved && !result.timestampSynced) {
+          setReplySyncPending(true);
+          setNotice(result.message || "Reply saved; timestamp synchronization is pending. Retry to finish.");
+          return;
+        }
+        clearSupportIdempotencyKey(keyScope, idempotencyKey);
+        setReplySyncPending(false);
+        setReplyMessage("");
+        await loadConversation(selectedTicket);
+        await loadTickets();
+      });
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Your reply could not be sent."
       );
     } finally {
+      replyInFlight.current = false;
       setSendingReply(false);
     }
   };
@@ -476,6 +513,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                   </label>
                   <select
                     value={category}
+                    disabled={createSyncPending}
                     onChange={(event) => setCategory(event.target.value)}
                     className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant outline-none text-sm focus:border-primary"
                   >
@@ -496,6 +534,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                     minLength={3}
                     maxLength={180}
                     value={subject}
+                    disabled={createSyncPending}
                     onChange={(event) => setSubject(event.target.value)}
                     placeholder="What do you need help with?"
                     className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant outline-none text-sm focus:border-primary"
@@ -512,6 +551,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                     maxLength={5000}
                     rows={7}
                     value={message}
+                    disabled={createSyncPending}
                     onChange={(event) => setMessage(event.target.value)}
                     placeholder="Tell us what happened and how we can help..."
                     className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant outline-none text-sm resize-y focus:border-primary"
@@ -526,7 +566,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                   disabled={creatingTicket}
                   className="w-full py-3.5 rounded-xl bg-primary text-on-primary font-bold text-sm disabled:opacity-50"
                 >
-                  {creatingTicket ? "Creating ticket..." : "Submit support ticket"}
+                  {creatingTicket ? "Creating ticket..." : createSyncPending ? "Retry ticket finalization" : "Submit support ticket"}
                 </button>
               </form>
             </div>
@@ -630,6 +670,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                     <textarea
                       id="support-reply"
                       value={replyMessage}
+                      disabled={replySyncPending}
                       onChange={(event) => setReplyMessage(event.target.value)}
                       placeholder="Write a message to NJS Support..."
                       rows={2}
@@ -652,7 +693,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                           <span className="material-symbols-outlined text-base align-middle mr-1">
                             send
                           </span>
-                          Send
+                          {replySyncPending ? "Retry timestamp sync" : "Send"}
                         </>
                       )}
                     </button>

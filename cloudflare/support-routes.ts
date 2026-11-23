@@ -37,6 +37,175 @@ const VALID_PRIORITIES = [
   "urgent",
 ] as const;
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function getIdempotencyKey(request: Request) {
+  const key = request.headers.get("Idempotency-Key")?.trim() ?? "";
+  return UUID_PATTERN.test(key) ? key.toLowerCase() : null;
+}
+
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function findTicketByCreationKey(userSupabase: ReturnType<typeof getDatabase>, userId: string, key: string) {
+  return userSupabase.from("support_tickets")
+    .select("id, user_id, ticket_number, subject, category, status, priority, created_at, updated_at, last_reply_at, creation_request_hash")
+    .eq("user_id", userId)
+    .eq("creation_idempotency_key", key)
+    .maybeSingle();
+}
+
+async function findReplyByIdempotencyKey(
+  userSupabase: ReturnType<typeof getDatabase>,
+  ticketId: string,
+  senderId: string,
+  key: string,
+) {
+  return userSupabase.from("support_replies")
+    .select("id, ticket_id, sender_id, sender_name, sender_email, is_admin, message, created_at, idempotency_key")
+    .eq("ticket_id", ticketId)
+    .eq("sender_id", senderId)
+    .eq("idempotency_key", key)
+    .maybeSingle();
+}
+
+async function createOrRecoverReply(
+  userSupabase: ReturnType<typeof getDatabase>,
+  input: {
+    ticketId: string;
+    senderId: string;
+    senderName: string;
+    senderEmail: string | null;
+    isAdmin: boolean;
+    message: string;
+    idempotencyKey: string;
+  },
+) {
+  let existing;
+  try {
+    existing = await findReplyByIdempotencyKey(userSupabase, input.ticketId, input.senderId, input.idempotencyKey);
+  } catch (error) {
+    return { reply: null, duplicate: false, conflict: false, uncertain: true, error };
+  }
+  if (existing.error) return { reply: null, duplicate: false, conflict: false, uncertain: true, error: existing.error };
+  if (existing.data) {
+    return {
+      reply: existing.data,
+      duplicate: true,
+      conflict: existing.data.message !== input.message,
+      uncertain: false,
+      error: null,
+    };
+  }
+
+  try {
+    const inserted = await userSupabase.from("support_replies").insert({
+      ticket_id: input.ticketId,
+      sender_id: input.senderId,
+      sender_name: input.senderName,
+      sender_email: input.senderEmail,
+      is_admin: input.isAdmin,
+      message: input.message,
+      idempotency_key: input.idempotencyKey,
+    }).select("id, ticket_id, sender_id, sender_name, sender_email, is_admin, message, created_at, idempotency_key").single();
+
+    if (!inserted.error && inserted.data) {
+      return { reply: inserted.data, duplicate: false, conflict: false, uncertain: false, error: null };
+    }
+
+    // A unique violation means another concurrent request won. Re-read only
+    // within the already-authorized ticket and authenticated sender scope.
+    let recovered;
+    try {
+      recovered = await findReplyByIdempotencyKey(userSupabase, input.ticketId, input.senderId, input.idempotencyKey);
+    } catch (error) {
+      return { reply: null, duplicate: false, conflict: false, uncertain: true, error };
+    }
+    if (recovered.data) {
+      return {
+        reply: recovered.data,
+        duplicate: true,
+        conflict: recovered.data.message !== input.message,
+        uncertain: false,
+        error: null,
+      };
+    }
+    return {
+      reply: null,
+      duplicate: false,
+      conflict: false,
+      uncertain: false,
+      error: inserted.error ?? recovered.error,
+    };
+  } catch (error) {
+    // The POST may have committed before the connection failed. Never tell the
+    // caller to use a new key; retrying this key will recover the row.
+    const recovered = await findReplyByIdempotencyKey(userSupabase, input.ticketId, input.senderId, input.idempotencyKey).catch(() => null);
+    if (recovered?.data) {
+      return {
+        reply: recovered.data,
+        duplicate: true,
+        conflict: recovered.data.message !== input.message,
+        uncertain: false,
+        error: null,
+      };
+    }
+    return { reply: null, duplicate: false, conflict: false, uncertain: true, error };
+  }
+}
+
+async function finalizeReplyTimestamp(
+  supabase: ReturnType<typeof getDatabase>,
+  ticketId: string,
+  replyCreatedAt: string,
+  userId?: string,
+  replyStatus?: "open" | "waiting_on_user",
+) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+    let ticketQuery = supabase.from("support_tickets")
+      .select("updated_at, last_reply_at")
+      .eq("id", ticketId);
+    if (userId) ticketQuery = ticketQuery.eq("user_id", userId);
+    const current = await ticketQuery.maybeSingle();
+    if (current.error || !current.data) return false;
+
+    const currentReplyAt = current.data.last_reply_at ? Date.parse(current.data.last_reply_at) : -Infinity;
+    const createdAt = Date.parse(replyCreatedAt);
+    if (!Number.isFinite(createdAt)) return false;
+
+    // A later reply already owns the timestamp. Do not let an old duplicate
+    // retry reorder the conversation or undo a later ticket status.
+    if (currentReplyAt > createdAt) return true;
+
+    const currentUpdatedAt = current.data.updated_at ? Date.parse(current.data.updated_at) : -Infinity;
+    const shouldApplyStatus = replyStatus !== undefined && currentUpdatedAt <= createdAt;
+    const patch: Record<string, string> = {
+      last_reply_at: replyCreatedAt,
+      updated_at: shouldApplyStatus || currentUpdatedAt <= createdAt
+        ? new Date().toISOString()
+        : current.data.updated_at,
+    };
+    if (shouldApplyStatus) patch.status = replyStatus;
+
+    let update = supabase.from("support_tickets").update(patch)
+      .eq("id", ticketId)
+      .eq("updated_at", current.data.updated_at);
+    if (userId) update = update.eq("user_id", userId);
+    if (current.data.last_reply_at) update = update.lte("last_reply_at", replyCreatedAt);
+    else update = update.is("last_reply_at", null);
+    const result = await update.select("id").maybeSingle();
+    if (result.error) return false;
+    if (result.data) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function getDatabase(env: SupportEnv) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SECRET_KEY) {
     throw new Error("Missing Supabase Worker configuration.");
@@ -47,6 +216,23 @@ function getDatabase(env: SupportEnv) {
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
+    },
+  });
+}
+
+function getUserDatabase(env: SupportEnv, accessToken: string) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SECRET_KEY) {
+    throw new Error("Missing Supabase Worker configuration.");
+  }
+
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    global: {
+      headers: { Authorization: `Bearer ${accessToken}` },
     },
   });
 }
@@ -74,7 +260,11 @@ async function requireUser(request: Request, env: SupportEnv) {
     };
   }
 
-  return { supabase, user: data.user };
+  return {
+    supabase,
+    userSupabase: getUserDatabase(env, token),
+    user: data.user,
+  };
 }
 
 async function requireAdmin(request: Request, env: SupportEnv) {
@@ -127,6 +317,11 @@ export async function handleCreateSupportTicket(
     return json({ error: auth.error }, auth.status);
   }
 
+  const idempotencyKey = getIdempotencyKey(request);
+  if (!idempotencyKey) {
+    return json({ error: "A valid Idempotency-Key is required. Retry the same submission with the same key." }, 400);
+  }
+
   let body: any;
 
   try {
@@ -159,67 +354,143 @@ export async function handleCreateSupportTicket(
     }, 400);
   }
 
-  const { supabase, user } = auth;
-  const now = new Date().toISOString();
+  const { supabase, userSupabase, user } = auth;
   const requesterName = getDisplayName(user);
   const requesterEmail = user.email!.trim().toLowerCase();
-
-  const { data: ticket, error: ticketError } = await supabase
-    .from("support_tickets")
-    .insert({
-      user_id: user.id,
-      requester_name: requesterName,
-      requester_email: requesterEmail,
-      company: null,
-      subject,
-      category,
-      priority: "normal",
-      status: "open",
-      last_reply_at: now,
-      updated_at: now,
-    })
-    .select("id, ticket_number, subject, category, status, priority, created_at, updated_at, last_reply_at")
-    .single();
-
-  if (ticketError || !ticket) {
-    console.error("Support ticket creation failed:", ticketError?.message);
-
-    return json({
-      error: "Could not create your ticket. Please try again.",
-    }, 500);
+  const requestHash = await sha256(JSON.stringify({ subject, category, message }));
+  let ticketResult;
+  try {
+    ticketResult = await findTicketByCreationKey(userSupabase, user.id, idempotencyKey);
+  } catch {
+    return json({ error: "We could not confirm whether this ticket was created. Retry the same submission with the same Idempotency-Key." }, 503);
+  }
+  if (ticketResult.error) {
+    return json({ error: "We could not confirm whether this ticket was created. Retry the same submission with the same Idempotency-Key." }, 503);
   }
 
-  const { error: replyError } = await supabase
-    .from("support_replies")
-    .insert({
-      ticket_id: ticket.id,
-      sender_id: user.id,
-      sender_name: requesterName,
-      sender_email: requesterEmail,
-      is_admin: false,
-      message,
-    });
+  let ticket = ticketResult.data;
+  let duplicateTicket = Boolean(ticket);
+  if (ticket && ticket.creation_request_hash !== requestHash) {
+    return json({ error: "This Idempotency-Key was already used for a different ticket submission." }, 409);
+  }
 
-  if (replyError) {
-    console.error("Initial support message failed:", replyError.message);
+  if (!ticket) {
+    let insertionError: unknown = null;
+    let insertionUncertain = false;
+    try {
+      const inserted = await userSupabase.from("support_tickets").insert({
+        user_id: user.id,
+        requester_name: requesterName,
+        requester_email: requesterEmail,
+        company: null,
+        subject,
+        category,
+        priority: "normal",
+        status: "open",
+        last_reply_at: null,
+        creation_idempotency_key: idempotencyKey,
+        creation_request_hash: requestHash,
+      }).select("id, user_id, ticket_number, subject, category, status, priority, created_at, updated_at, last_reply_at, creation_request_hash").single();
+      if (!inserted.error && inserted.data) ticket = inserted.data;
+      else insertionError = inserted.error;
+    } catch (error) {
+      insertionError = error;
+      insertionUncertain = true;
+    }
 
-    await supabase
-      .from("support_tickets")
-      .delete()
-      .eq("id", ticket.id)
-      .eq("user_id", user.id);
+    if (!ticket) {
+      // A concurrent request may have won the unique-index race, or the POST
+      // may have committed before its response was interrupted.
+      let recovered;
+      try {
+        recovered = await findTicketByCreationKey(userSupabase, user.id, idempotencyKey);
+      } catch {
+        return json({ error: "Ticket creation may have succeeded, but could not be confirmed. Retry the same submission with the same Idempotency-Key." }, 503);
+      }
+      if (recovered.error) {
+        return json({ error: "Ticket creation may have succeeded, but could not be confirmed. Retry the same submission with the same Idempotency-Key." }, 503);
+      }
+      ticket = recovered.data;
+      duplicateTicket = Boolean(ticket);
+      if (!ticket) {
+        console.error("Support ticket creation failed:", insertionError instanceof Error ? insertionError.message : "unknown error");
+        return json({
+          error: insertionUncertain
+            ? "Ticket creation may have succeeded, but could not be confirmed. Retry the same submission with the same Idempotency-Key."
+            : "Could not create the ticket. You can safely retry this submission with the same Idempotency-Key.",
+        }, insertionUncertain ? 503 : 500);
+      }
+      if (ticket.creation_request_hash !== requestHash) {
+        return json({ error: "This Idempotency-Key was already used for a different ticket submission." }, 409);
+      }
+    }
+  }
 
+  const initialReply = await createOrRecoverReply(userSupabase, {
+    ticketId: ticket.id,
+    senderId: user.id,
+    senderName: requesterName,
+    senderEmail: requesterEmail,
+    isAdmin: false,
+    message,
+    idempotencyKey,
+  });
+  if (initialReply.conflict) {
+    return json({ error: "This Idempotency-Key was already used for a different initial message." }, 409);
+  }
+  if (!initialReply.reply) {
+    const messageText = initialReply.uncertain
+      ? "Your ticket is saved, but the initial message result could not be confirmed. Retry the same submission with the same Idempotency-Key."
+      : "Your ticket is saved, but its initial message still needs to be submitted. Retry the same submission with the same Idempotency-Key.";
     return json({
-      error: "Your message could not be saved. Please try again.",
-    }, 500);
+      success: true,
+      ticketCreated: true,
+      replySaved: initialReply.uncertain ? null : false,
+      timestampSynced: false,
+      idempotentReplay: duplicateTicket,
+      message: messageText,
+    }, 202);
+  }
+
+  const timestampSynced = await finalizeReplyTimestamp(
+    supabase,
+    ticket.id,
+    initialReply.reply.created_at,
+    user.id,
+    "open",
+  );
+  const responseTicket = {
+    id: ticket.id,
+    ticket_number: ticket.ticket_number,
+    subject: ticket.subject,
+    category: ticket.category,
+    status: ticket.status,
+    priority: ticket.priority,
+    created_at: ticket.created_at,
+    updated_at: ticket.updated_at,
+    last_reply_at: initialReply.reply.created_at,
+  };
+  if (!timestampSynced) {
+    return json({
+      success: true,
+      ticket: responseTicket,
+      ticketNumber: ticket.ticket_number,
+      replySaved: true,
+      timestampSynced: false,
+      idempotentReplay: duplicateTicket || initialReply.duplicate,
+      message: "Your ticket and initial message are saved. Ticket activity timestamp synchronization is still pending; retry with the same key to finish it.",
+    }, 202);
   }
 
   return json({
     success: true,
-    ticket,
+    ticket: responseTicket,
     ticketNumber: ticket.ticket_number,
+    replySaved: true,
+    timestampSynced: true,
+    idempotentReplay: duplicateTicket || initialReply.duplicate,
     message: "Your support ticket was submitted successfully.",
-  }, 201);
+  }, duplicateTicket || initialReply.duplicate ? 200 : 201);
 }
 
 /**
@@ -332,6 +603,11 @@ export async function handleCustomerSupportReply(
     return json({ error: auth.error }, auth.status);
   }
 
+  const idempotencyKey = getIdempotencyKey(request);
+  if (!idempotencyKey) {
+    return json({ error: "A valid Idempotency-Key is required. Retry the same reply with the same key." }, 400);
+  }
+
   if (!ticketId) {
     return json({ error: "Ticket ID is required." }, 400);
   }
@@ -354,7 +630,7 @@ export async function handleCustomerSupportReply(
 
   const { supabase, user } = auth;
 
-  const { data: ticket, error: ticketError } = await supabase
+  const { data: ticket, error: ticketError } = await auth.userSupabase
     .from("support_tickets")
     .select("id, status")
     .eq("id", ticketId)
@@ -371,45 +647,55 @@ export async function handleCustomerSupportReply(
     }, 409);
   }
 
-  const now = new Date().toISOString();
-
-  const { data: reply, error: replyError } = await supabase
-    .from("support_replies")
-    .insert({
-      ticket_id: ticketId,
-      sender_id: user.id,
-      sender_name: getDisplayName(user),
-      sender_email: user.email ?? null,
-      is_admin: false,
-      message,
-    })
-    .select("*")
-    .single();
-
-  if (replyError || !reply) {
-    console.error("Customer support reply failed:", replyError?.message);
-    return json({ error: "Could not send your reply." }, 500);
+  const outcome = await createOrRecoverReply(auth.userSupabase, {
+    ticketId,
+    senderId: user.id,
+    senderName: getDisplayName(user),
+    senderEmail: user.email ?? null,
+    isAdmin: false,
+    message,
+    idempotencyKey,
+  });
+  if (outcome.conflict) {
+    return json({ error: "This Idempotency-Key was already used for a different reply." }, 409);
+  }
+  if (!outcome.reply) {
+    console.error("Customer support reply could not be confirmed:", outcome.error instanceof Error ? outcome.error.message : "unknown error");
+    return json({
+      error: outcome.uncertain
+        ? "The reply may have been saved, but the result could not be confirmed. Retry the same message with the same Idempotency-Key."
+        : "Could not save the reply. You can safely retry the same message with the same Idempotency-Key.",
+      replySaved: false,
+      timestampSynced: false,
+    }, outcome.uncertain ? 503 : 500);
   }
 
-  const { error: updateError } = await supabase
-    .from("support_tickets")
-    .update({
-      last_reply_at: now,
-      updated_at: now,
-      status: "open",
-    })
-    .eq("id", ticketId)
-    .eq("user_id", user.id);
-
-  if (updateError) {
-    console.error("Ticket timestamp update failed:", updateError.message);
+  const timestampSynced = await finalizeReplyTimestamp(
+    supabase,
+    ticketId,
+    outcome.reply.created_at,
+    user.id,
+    "open",
+  );
+  if (!timestampSynced) {
+    return json({
+      success: true,
+      reply: outcome.reply,
+      idempotentReplay: outcome.duplicate,
+      replySaved: true,
+      timestampSynced: false,
+      message: "Your reply is saved. Ticket activity timestamp synchronization is pending; retry this reply with the same key to finish it.",
+    }, 202);
   }
 
   return json({
     success: true,
-    message: "Your reply was sent successfully.",
-    reply,
-  }, 201);
+    message: outcome.duplicate ? "Your earlier reply was already saved." : "Your reply was sent successfully.",
+    reply: outcome.reply,
+    replySaved: true,
+    timestampSynced: true,
+    idempotentReplay: outcome.duplicate,
+  }, outcome.duplicate ? 200 : 201);
 }
 
 /**
@@ -523,6 +809,10 @@ export async function handleAdminSupportPost(
     return json({ error: auth.error }, auth.status);
   }
 
+  const idempotencyKey = request.headers.has("Idempotency-Key")
+    ? getIdempotencyKey(request)
+    : null;
+
   let body: any;
 
   try {
@@ -548,6 +838,9 @@ export async function handleAdminSupportPost(
   }
 
   if (body.action === "reply") {
+    if (!idempotencyKey) {
+      return json({ error: "A valid Idempotency-Key is required. Retry the same reply with the same key." }, 400);
+    }
     const message = String(body.message ?? "").trim();
 
     if (!message || message.length > 5000) {
@@ -558,44 +851,55 @@ export async function handleAdminSupportPost(
 
     const adminName = getDisplayName(auth.user) || "NJS Support";
 
-    const { data: reply, error: replyError } = await auth.supabase
-      .from("support_replies")
-      .insert({
-        ticket_id: ticketId,
-        sender_id: auth.user.id,
-        sender_name: adminName,
-        sender_email: auth.user.email ?? null,
-        is_admin: true,
-        message,
-      })
-      .select("*")
-      .single();
-
-    if (replyError || !reply) {
-      console.error("Admin support reply failed:", replyError?.message);
-      return json({ error: "Could not send your reply." }, 500);
+    const outcome = await createOrRecoverReply(auth.userSupabase, {
+      ticketId,
+      senderId: auth.user.id,
+      senderName: adminName,
+      senderEmail: auth.user.email ?? null,
+      isAdmin: true,
+      message,
+      idempotencyKey,
+    });
+    if (outcome.conflict) {
+      return json({ error: "This Idempotency-Key was already used for a different reply." }, 409);
+    }
+    if (!outcome.reply) {
+      console.error("Admin support reply could not be confirmed:", outcome.error instanceof Error ? outcome.error.message : "unknown error");
+      return json({
+        error: outcome.uncertain
+          ? "The administrator reply may have been saved, but the result could not be confirmed. Retry the same message with the same Idempotency-Key."
+          : "Could not save the reply. Retry the same message with the same Idempotency-Key.",
+        replySaved: false,
+        timestampSynced: false,
+      }, outcome.uncertain ? 503 : 500);
     }
 
-    const now = new Date().toISOString();
-
-    const { error: updateError } = await auth.supabase
-      .from("support_tickets")
-      .update({
-        last_reply_at: now,
-        updated_at: now,
-        status: "waiting_on_user",
-      })
-      .eq("id", ticketId);
-
-    if (updateError) {
-      console.error("Ticket timestamp update failed:", updateError.message);
+    const timestampSynced = await finalizeReplyTimestamp(
+      auth.supabase,
+      ticketId,
+      outcome.reply.created_at,
+      undefined,
+      "waiting_on_user",
+    );
+    if (!timestampSynced) {
+      return json({
+        success: true,
+        reply: outcome.reply,
+        idempotentReplay: outcome.duplicate,
+        replySaved: true,
+        timestampSynced: false,
+        message: "The reply is saved. Ticket activity timestamp synchronization is pending; retry this reply with the same key to finish it.",
+      }, 202);
     }
 
     return json({
       success: true,
-      message: "Reply sent successfully.",
-      reply,
-    }, 201);
+      message: outcome.duplicate ? "The earlier reply was already saved." : "Reply sent successfully.",
+      reply: outcome.reply,
+      replySaved: true,
+      timestampSynced: true,
+      idempotentReplay: outcome.duplicate,
+    }, outcome.duplicate ? 200 : 201);
   }
 
   const updates: Record<string, string> = {};

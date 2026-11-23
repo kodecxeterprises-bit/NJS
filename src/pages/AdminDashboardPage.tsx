@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import {
+  buildAdminSupportReplyPayload,
+  canApplyTicketResponse,
+  clearSupportIdempotencyKey,
+  getSupportIdempotencyKey,
+  updateSupportReplyDraft,
+  type SupportReplyDrafts,
+} from "../lib/supportIdempotency";
 
 type Section =
   | "Overview" | "Users" | "Businesses" | "Messages" | "Connections"
@@ -158,7 +166,7 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [replies, setReplies] = useState<Reply[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [replyMessage, setReplyMessage] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState<SupportReplyDrafts>({});
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [userSearch, setUserSearch] = useState("");
@@ -168,7 +176,14 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
   const [businessPage, setBusinessPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [ticketLoading, setTicketLoading] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [sendingTickets, setSendingTickets] = useState<Record<string, boolean>>({});
+  const replyInFlight = useRef(new Set<string>());
+  const selectedTicketIdRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const replyDraft = selectedTicket ? replyDrafts[selectedTicket.id] : undefined;
+  const replyMessage = replyDraft?.message ?? "";
+  const replySyncPending = replyDraft?.timestampPending ?? false;
+  const sending = selectedTicket ? Boolean(sendingTickets[selectedTicket.id]) : false;
   const [actionLoading, setActionLoading] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -250,7 +265,16 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
     refreshCurrent();
   }, [refreshCurrent]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      selectedTicketIdRef.current = null;
+    };
+  }, []);
+
   const loadTicketDetails = async (ticket: Ticket) => {
+    selectedTicketIdRef.current = ticket.id;
     setSelectedTicket(ticket);
     setTicketLoading(true);
     setReplies([]);
@@ -259,37 +283,69 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
       const data = await request(
         `/api/admin/support?ticketId=${encodeURIComponent(ticket.id)}`
       );
+      if (!canApplyTicketResponse(ticket.id, selectedTicketIdRef.current, mountedRef.current)) return;
       setSelectedTicket(data.ticket || ticket);
       setReplies(data.replies || data.ticket?.replies || []);
     } catch (err) {
-      handleError(err);
+      if (canApplyTicketResponse(ticket.id, selectedTicketIdRef.current, mountedRef.current)) handleError(err);
     } finally {
-      setTicketLoading(false);
+      if (canApplyTicketResponse(ticket.id, selectedTicketIdRef.current, mountedRef.current)) setTicketLoading(false);
     }
   };
 
   const sendReply = async () => {
     if (!selectedTicket || !replyMessage.trim()) return;
-    setSending(true);
+    const ticket = selectedTicket;
+    const message = replyMessage.trim();
+    if (replyInFlight.current.has(ticket.id)) return;
+    replyInFlight.current.add(ticket.id);
+    setSendingTickets((current) => ({ ...current, [ticket.id]: true }));
     setError("");
     setNotice("");
     try {
-      await request("/api/admin/support", {
+      const payload = buildAdminSupportReplyPayload(ticket.id, message);
+      const keyScope = `njs-support:admin-reply:${user.id}:${ticket.id}`;
+      const idempotencyKey = await getSupportIdempotencyKey(keyScope, JSON.stringify(payload));
+      const result = await request("/api/admin/support", {
         method: "POST",
-        body: JSON.stringify({
-          action: "reply",
-          ticketId: selectedTicket.id,
-          message: replyMessage.trim(),
-        }),
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(payload),
       });
-      setReplyMessage("");
-      setNotice("Reply sent successfully.");
-      await loadTicketDetails(selectedTicket);
+      if (result.replySaved && !result.timestampSynced) {
+        if (mountedRef.current) {
+          setReplyDrafts((current) => updateSupportReplyDraft(current, ticket.id, {
+            message,
+            timestampPending: true,
+          }));
+        }
+        if (canApplyTicketResponse(ticket.id, selectedTicketIdRef.current, mountedRef.current)) {
+          setNotice(result.message || "Reply saved; ticket timestamp synchronization is pending. Retry to finish.");
+        }
+        return;
+      }
+      clearSupportIdempotencyKey(keyScope, idempotencyKey);
+      if (mountedRef.current) {
+        setReplyDrafts((current) => current[ticket.id]?.message === message
+          ? updateSupportReplyDraft(current, ticket.id, null)
+          : current);
+      }
+      if (canApplyTicketResponse(ticket.id, selectedTicketIdRef.current, mountedRef.current)) {
+        setNotice("Reply sent successfully.");
+      }
+      if (canApplyTicketResponse(ticket.id, selectedTicketIdRef.current, mountedRef.current)) {
+        await loadTicketDetails(ticket);
+      }
       await loadTickets();
     } catch (err) {
-      handleError(err);
+      if (canApplyTicketResponse(ticket.id, selectedTicketIdRef.current, mountedRef.current)) handleError(err);
     } finally {
-      setSending(false);
+      replyInFlight.current.delete(ticket.id);
+      if (mountedRef.current) {
+        setSendingTickets((current) => {
+          const { [ticket.id]: _sending, ...remaining } = current;
+          return remaining;
+        });
+      }
     }
   };
 
@@ -1018,7 +1074,14 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
                       <div className="p-5 border-t border-white/5">
                         <textarea
                           value={replyMessage}
-                          onChange={(event) => setReplyMessage(event.target.value)}
+                          disabled={sending || replySyncPending}
+                          onChange={(event) => {
+                            if (!selectedTicket) return;
+                            setReplyDrafts((current) => updateSupportReplyDraft(current, selectedTicket.id, {
+                              message: event.target.value,
+                              timestampPending: false,
+                            }));
+                          }}
                           rows={3}
                           placeholder="Write a reply to this user..."
                           className="w-full bg-[#09090f] border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500 resize-y"
@@ -1029,7 +1092,7 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
                             disabled={sending || !replyMessage.trim()}
                             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold disabled:opacity-40"
                           >
-                            {sending ? "Sending..." : "Send reply"}
+                            {sending ? "Sending..." : replySyncPending ? "Retry timestamp sync" : "Send reply"}
                           </button>
                         </div>
                       </div>

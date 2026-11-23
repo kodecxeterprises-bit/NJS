@@ -15,9 +15,19 @@ import {
   handleAdminBusinessesGet,
   handleAdminBusinessesPost,
 } from "./admin-routes";
+import {
+  cancelSubscription,
+  effectiveSubscriptionStatus,
+  getBillingSubscription,
+  handlePaystackWebhook,
+  initializeCheckout,
+  resumeSubscription,
+} from "./billing-routes";
 interface Env {
   SUPABASE_URL: string;
   SUPABASE_SECRET_KEY: string;
+  PAYSTACK_SECRET_KEY: string;
+  PAYSTACK_WEBHOOK_SECRET?: string;
   ASSETS: {
     fetch: (request: Request) => Promise<Response>;
   };
@@ -219,6 +229,43 @@ async function handleAuthMe(request: Request, env: Env) {
     return json({ error: "Could not load your business profile" }, 500);
   }
 
+  const { data: currentBillingRows, error: billingError } = await supabase
+    .from("subscriptions")
+    .select("id, plan_code, status, amount_kobo, currency, current_period_start, current_period_end, cancel_at_period_end, cancelled_at, created_at")
+    .eq("user_id", user.id)
+    .in("status", ["active", "non_renewing", "past_due"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (billingError) {
+    console.error("Subscription lookup failed:", billingError.message);
+    return json({ error: "Could not load your subscription" }, 500);
+  }
+
+  let billing = currentBillingRows?.[0] ?? null;
+  if (!billing) {
+    const { data: latestRows, error: latestError } = await supabase
+      .from("subscriptions")
+      .select("id, plan_code, status, amount_kobo, currency, current_period_start, current_period_end, cancel_at_period_end, cancelled_at, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (latestError) return json({ error: "Could not load your subscription" }, 500);
+    billing = latestRows?.[0] ?? null;
+  }
+  if (billing) {
+    billing = {
+      ...billing,
+      status: effectiveSubscriptionStatus(billing.status, billing.current_period_end),
+    };
+  }
+  const planNames: Record<string, "pro" | "enterprise"> = {
+    pro_monthly: "pro",
+    pro_annual: "pro",
+    enterprise_monthly: "enterprise",
+    enterprise_annual: "enterprise",
+  };
+
   return json({
     user: {
       id: user.id,
@@ -230,8 +277,22 @@ async function handleAuthMe(request: Request, env: Env) {
     },
     businessProfile: mapBusiness(business),
     subscription: {
-      plan: "free",
+      plan: billing && ["active", "non_renewing", "past_due"].includes(billing.status)
+        ? planNames[billing.plan_code] ?? "free"
+        : "free",
       creditsAvailable: 4850,
+      ...(billing ? {
+        subscriptionId: billing.id,
+        planCode: billing.plan_code,
+        status: billing.status,
+        amountKobo: Number(billing.amount_kobo),
+        currency: billing.currency,
+        billingInterval: billing.plan_code.endsWith("annual") ? "annually" : "monthly",
+        currentPeriodStart: billing.current_period_start,
+        currentPeriodEnd: billing.current_period_end,
+        cancelAtPeriodEnd: billing.cancel_at_period_end,
+        cancelledAt: billing.cancelled_at,
+      } : { status: "free" }),
     },
   });
 }
@@ -797,6 +858,26 @@ export default {
 
       if (url.pathname === "/api/auth/me") {
         return await handleAuthMe(request, env);
+      }
+
+      if (url.pathname === "/api/billing/webhook") {
+        return await handlePaystackWebhook(request, env);
+      }
+
+      if (url.pathname === "/api/billing/checkout") {
+        return await initializeCheckout(request, env);
+      }
+
+      if (url.pathname === "/api/billing/subscription") {
+        return await getBillingSubscription(request, env);
+      }
+
+      if (url.pathname === "/api/billing/cancel") {
+        return await cancelSubscription(request, env);
+      }
+
+      if (url.pathname === "/api/billing/resume") {
+        return await resumeSubscription(request, env);
       }
 
       if (url.pathname === "/api/business/save") {
