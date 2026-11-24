@@ -407,3 +407,40 @@ test("subscription renewal changes are exposed through authenticated worker rout
   assert.match(routes, /patch\.status = "non_renewing"/);
   assert.match(routes, /current paid access/);
 });
+test("accepts Paystack fees only when the total reconciles to the approved plan price", () => {
+  const baseAmount = 15_000_000;
+
+  assert.equal(verifiedPlanAmountMatches({
+    amount: 15_200_000,
+    requested_amount: baseAmount,
+    fees: 200_000,
+  }, baseAmount), true);
+
+  assert.equal(verifiedPlanAmountMatches({
+    amount: 15_000_000,
+    requested_amount: baseAmount,
+    fees: 0,
+  }, baseAmount), true);
+
+  assert.equal(verifiedPlanAmountMatches({
+    amount: 15_200_000,
+  }, baseAmount), false);
+
+  assert.equal(verifiedPlanAmountMatches({
+    amount: 15_200_000,
+    requested_amount: baseAmount,
+    fees: 100_000,
+  }, baseAmount), false);
+
+  assert.equal(verifiedPlanAmountMatches({
+    amount: 15_200_000,
+    requested_amount: baseAmount + 1,
+    fees: 199_999,
+  }, baseAmount), false);
+
+  assert.equal(verifiedPlanAmountMatches({
+    amount: 15_200_000,
+    requested_amount: baseAmount,
+    fees: -1,
+  }, baseAmount), false);
+});
