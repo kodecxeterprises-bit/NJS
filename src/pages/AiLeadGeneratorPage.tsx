@@ -97,7 +97,7 @@ export const AiLeadGeneratorPage: React.FC<AiLeadGeneratorPageProps> = ({ onNavi
       }
     } catch (err: any) {
       console.error('Lead gen error:', err);
-      showToast('Lead discovery completed.');
+      showToast(err.message || 'Lead discovery failed.');
     } finally {
       setIsGenerating(false);
     }

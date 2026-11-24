@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 
 interface SignUpPageProps {
   onNavigate: (path: string) => void;
-  onRegistered: (verificationCode?: string) => void;
+  onRegistered: (email: string) => void;
 }
 
 export const SignUpPage: React.FC<SignUpPageProps> = ({ onNavigate, onRegistered }) => {
@@ -60,7 +60,7 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({ onNavigate, onRegistered
     setIsLoading(false);
 
     if (res.success) {
-      onRegistered(res.verificationCode);
+      onRegistered(email.trim());
     } else {
       setError(res.error || 'Failed to create account.');
     }

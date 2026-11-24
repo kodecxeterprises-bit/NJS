@@ -19,7 +19,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signUp: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string; verificationCode?: string }>;
   signInWithGoogle: () => Promise<{ success: boolean; isNewUser?: boolean; error?: string }>;
-  sendVerificationEmail: (toEmail: string, code: string, name?: string) => Promise<{ success: boolean; error?: string; viaGmail?: boolean }>;
+  sendVerificationEmail: (toEmail: string, code?: string, name?: string) => Promise<{ success: boolean; error?: string; viaGmail?: boolean }>;
   signOut: () => Promise<void>;
   verifyEmail: (code: string) => Promise<{ success: boolean; error?: string }>;
   updateBusinessProfile: (profile: Partial<BusinessProfile>) => Promise<{ success: boolean; profile?: BusinessProfile; error?: string }>;
@@ -189,7 +189,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         password,
         options: {
           data: { name: name.trim() },
-          emailRedirectTo: `${window.location.origin}/`,
+          emailRedirectTo: `${window.location.origin}/verify-email`,
         },
       });
 
@@ -238,7 +238,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         type: 'signup',
         email: toEmail.trim(),
         options: {
-          emailRedirectTo: `${window.location.origin}/`,
+          emailRedirectTo: `${window.location.origin}/verify-email`,
         },
       });
 

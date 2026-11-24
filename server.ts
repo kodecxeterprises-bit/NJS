@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { apiRouter } from './src/server/api';
+import { apiRouter } from './src/lib/api';
 
 dotenv.config();
 

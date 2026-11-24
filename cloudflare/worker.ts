@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { handleAppApi } from "./app-routes";
 
 import {
   handleCreateSupportTicket,
@@ -30,6 +31,7 @@ interface Env {
   SUPABASE_SECRET_KEY: string;
   PAYSTACK_SECRET_KEY: string;
   PAYSTACK_WEBHOOK_SECRET?: string;
+  GEMINI_API_KEY?: string;
   ASSETS: {
     fetch: (request: Request) => Promise<Response>;
   };
@@ -986,6 +988,9 @@ export default {
 
         return json({ error: "Method not allowed" }, 405);
       }
+
+      const appApiResponse = await handleAppApi(request, env);
+      if (appApiResponse) return appApiResponse;
 
       if (url.pathname.startsWith("/api/")) {
         return json({ error: "API route not found" }, 404);

@@ -49,7 +49,7 @@ const MainAppContent: React.FC = () => {
     return normalizePath(window.location.pathname);
   });
   const [navigationState, setNavigationState] = useState<any>(null);
-  const [verificationCodePreview, setVerificationCodePreview] = useState<string | undefined>();
+  const [verificationEmail, setVerificationEmail] = useState<string>('');
   const [unreadNotifications, setUnreadNotifications] = useState(0);
 // Keep the sidebar unread badge updated in real time.
 useEffect(() => {
@@ -180,8 +180,8 @@ useEffect(() => {
     return (
       <SignUpPage
         onNavigate={navigate}
-        onRegistered={(code) => {
-          setVerificationCodePreview(code);
+        onRegistered={(email) => {
+          setVerificationEmail(email);
           navigate('verify-email');
         }}
       />
@@ -206,7 +206,7 @@ useEffect(() => {
       <VerifyEmailPage
         onNavigate={navigate}
         onVerified={() => navigate('onboarding')}
-        initialCode={verificationCodePreview}
+        initialEmail={verificationEmail}
       />
     );
   }
