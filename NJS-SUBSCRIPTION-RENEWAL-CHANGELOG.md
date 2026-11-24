@@ -24,3 +24,9 @@ Migration `20261123100000_njs_scheduled_subscription_plan_changes.sql` is includ
 ## Verification status
 
 All 49 TypeScript/TSX files passed a syntax transpilation check. Dependency installation timed out in this environment, so full lint, automated tests, and production build remain to be run by the existing Cloudflare build pipeline. This archive has not been deployed.
+
+## Production build import repair (2026-11-24)
+
+- Corrected the Google authentication imports in `ForgotPasswordPage.tsx` and `VerifyEmailPage.tsx` to reference the existing implementation at `src/lib/googleAuth.ts`.
+- The previous imports pointed to a non-existent `src/services/googleAuth` path and caused the Vite production build to fail with unresolved imports.
+- Dependency installation timed out in the repair environment, so a full Vite production build could not be rerun here. Re-run the GitHub Actions production build after committing this archive.

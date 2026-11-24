@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { signInWithGooglePopup } from '../../services/googleAuth';
+import { signInWithGooglePopup } from '../../lib/googleAuth';
 
 interface VerifyEmailPageProps {
   onNavigate: (path: string) => void;

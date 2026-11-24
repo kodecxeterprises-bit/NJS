@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { signInWithGooglePopup } from '../../services/googleAuth';
+import { signInWithGooglePopup } from '../../lib/googleAuth';
 
 interface ForgotPasswordPageProps {
   onNavigate: (path: string) => void;
