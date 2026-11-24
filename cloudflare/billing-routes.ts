@@ -77,7 +77,9 @@ export function subscriptionStateTransition(event: string, currentStatus: string
     case "invoice.payment_failed": return "past_due";
     case "subscription.not_renew":
     case "subscription.expiring": return "non_renewing";
-    case "subscription.disable": return "cancelled";
+    case "subscription.disable":
+      // Disabling renewal is not the same as ending already-paid access.
+      return ["active", "non_renewing", "past_due"].includes(currentStatus) ? "non_renewing" : null;
     case "subscription.expired": return "expired";
     default: return null;
   }
@@ -104,7 +106,9 @@ export function reconcileSubscriptionStatus(
     case "active": return allowActivation && mayBeActive ? "active" : null;
     case "non-renewing": return mayBeActive ? "non_renewing" : null;
     case "attention": return mayBeActive ? "past_due" : null;
-    case "cancelled": return "cancelled";
+    // Paystack may report a disabled subscription as cancelled before the
+    // customer's paid-through date. Keep entitlement until current_period_end.
+    case "cancelled": return mayBeActive ? "non_renewing" : null;
     case "completed": return "expired";
     default: return null;
   }
@@ -194,16 +198,25 @@ export async function getBillingSubscription(request: Request, env: BillingEnv) 
     subscription = latestRows?.[0] ?? null;
   }
   let payment = null;
+  let paymentHistory: any[] = [];
   if (subscription) {
     const { data, error: paymentError } = await auth.supabase
       .from("payment_transactions")
       .select("reference, amount_kobo, currency, status, paid_at, created_at")
-      .eq("subscription_id", subscription.id)
+      .eq("user_id", auth.user.id)
       .order("created_at", { ascending: false })
-      .limit(1);
+      .limit(20);
     if (paymentError) return json({ error: "Could not load your payment information." }, 500);
-    payment = safePayment(data?.[0]);
+    paymentHistory = (data ?? []).map(safePayment).filter(Boolean);
+    payment = paymentHistory.find((item) => item.reference) ?? null;
   }
+  const { data: scheduledRows, error: scheduledError } = await auth.supabase
+    .from("scheduled_plan_changes")
+    .select("id, target_plan_code, effective_at, status")
+    .eq("user_id", auth.user.id).eq("status", "scheduled")
+    .order("created_at", { ascending: false }).limit(1);
+  if (scheduledError) return json({ error: "Could not load your scheduled plan change." }, 500);
+  const scheduled = scheduledRows?.[0] ?? null;
   const state = subscription
     ? effectiveSubscriptionStatus(subscription.status, subscription.current_period_end)
     : undefined;
@@ -221,6 +234,14 @@ export async function getBillingSubscription(request: Request, env: BillingEnv) 
     cancelledAt: subscription.cancelled_at,
     createdAt: subscription.created_at,
     latestPayment: payment,
+    paymentHistory,
+    scheduledChange: scheduled ? {
+      id: scheduled.id,
+      planCode: scheduled.target_plan_code,
+      plan: PLANS[scheduled.target_plan_code as PlanCode]?.publicPlan ?? "free",
+      billingInterval: scheduled.target_plan_code.endsWith("annual") ? "annually" : "monthly",
+      effectiveAt: scheduled.effective_at,
+    } : null,
   } : null });
 }
 
@@ -388,6 +409,12 @@ async function manageSubscription(request: Request, env: BillingEnv, action: "ca
     .limit(1)
     .maybeSingle();
   if (error) return json({ error: "Could not load your subscription." }, 500);
+  if (action === "resume") {
+    const { data: pendingChange, error: pendingChangeError } = await auth.supabase.from("scheduled_plan_changes")
+      .select("id").eq("user_id", auth.user.id).eq("status", "scheduled").maybeSingle();
+    if (pendingChangeError) return json({ error: "Could not check your scheduled plan change." }, 500);
+    if (pendingChange) return json({ error: "Cancel your scheduled plan change before resuming the current renewal." }, 409);
+  }
   if (!subscription?.paystack_subscription_code || !subscription.paystack_email_token) {
     return json({ error: "There is no manageable Paystack subscription." }, 409);
   }
@@ -421,6 +448,159 @@ export function cancelSubscription(request: Request, env: BillingEnv) {
 
 export function resumeSubscription(request: Request, env: BillingEnv) {
   return manageSubscription(request, env, "resume");
+}
+
+export async function schedulePlanChange(request: Request, env: BillingEnv) {
+  if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+  const auth = await requireUser(request, env);
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
+  const bytes = await readRawBody(request, 16_384);
+  if (!bytes) return json({ error: "Request is too large." }, 413);
+  let body: unknown;
+  try { body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+  catch { return json({ error: "Invalid JSON request body." }, 400); }
+  if (!isRecord(body) || !isPlanCode(body.planCode)) return json({ error: "Choose a valid plan." }, 400);
+  const target = body.planCode;
+  const { data: current, error: currentError } = await auth.supabase.from("subscriptions")
+    .select("id, plan_code, status, current_period_end, paystack_subscription_code, paystack_email_token, paystack_customer_code, authorization_signature, cancel_at_period_end")
+    .eq("user_id", auth.user.id).in("status", ["active", "non_renewing", "past_due"])
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (currentError) return json({ error: "Could not load your current subscription." }, 500);
+  if (!current || !current.current_period_end || Date.parse(current.current_period_end) <= Date.now()) {
+    return json({ error: "Your current paid period is not eligible for a scheduled change." }, 409);
+  }
+  if (current.plan_code === target) return json({ error: "That is already your current plan and billing interval." }, 409);
+  if (current.cancel_at_period_end) return json({ error: "Your subscription is already set to end. Resume it in Settings before scheduling a plan change." }, 409);
+  let reusableAuthorization = current.authorization_signature;
+  let customerCode = current.paystack_customer_code;
+  if (!reusableAuthorization) {
+    // Backfill existing subscribers safely from their latest verified successful payment.
+    const { data: lastPayment, error: lastPaymentError } = await auth.supabase.from("payment_transactions")
+      .select("reference").eq("subscription_id", current.id).eq("status", "success")
+      .order("paid_at", { ascending: false }).limit(1).maybeSingle();
+    if (lastPaymentError) return json({ error: "Could not verify your saved payment method." }, 500);
+    if (lastPayment?.reference) {
+      try {
+        const verified = await verifyTransaction(env, lastPayment.reference);
+        if (verified?.status === "success" && verified.reference === lastPayment.reference && verified.domain === "test"
+          && typeof verified?.authorization?.authorization_code === "string") {
+          reusableAuthorization = verified.authorization.authorization_code;
+          customerCode = typeof verified?.customer?.customer_code === "string" ? verified.customer.customer_code : customerCode;
+          await auth.supabase.from("subscriptions").update({
+            authorization_signature: reusableAuthorization,
+            paystack_customer_code: customerCode,
+            updated_at: new Date().toISOString(),
+          }).eq("id", current.id);
+        }
+      } catch { /* handled by the eligibility response below */ }
+    }
+  }
+  if (!customerCode || !reusableAuthorization || !current.paystack_subscription_code || !current.paystack_email_token) {
+    return json({ error: "Paystack has not provided a reusable authorization for this subscription yet. Your current plan is unchanged; contact support if you need to switch now." }, 409);
+  }
+  const { data: plan, error: planError } = await auth.supabase.from("billing_plans")
+    .select("code, amount_kobo, currency, billing_interval, is_active").eq("code", target).eq("is_active", true).maybeSingle();
+  if (planError || !plan || Number(plan.amount_kobo) !== APPROVED_AMOUNTS[target] || plan.currency !== "NGN") {
+    return json({ error: "The selected plan is unavailable or its price is not approved." }, 409);
+  }
+  const { data: existingChange, error: existingChangeError } = await auth.supabase.from("scheduled_plan_changes")
+    .select("id").eq("user_id", auth.user.id).eq("status", "scheduled").maybeSingle();
+  if (existingChangeError) return json({ error: "Could not check your pending plan change." }, 500);
+  if (existingChange) return json({ error: "You already have a scheduled plan change. Cancel it before choosing another." }, 409);
+
+  let replacement: any;
+  try {
+    replacement = await paystackRequest(env, "/subscription", {
+      customer: customerCode,
+      plan: PLANS[target].paystackCode,
+      authorization: reusableAuthorization,
+      start_date: new Date(current.current_period_end).toISOString(),
+    });
+    if (typeof replacement?.subscription_code !== "string" || typeof replacement?.email_token !== "string") {
+      throw new Error("Paystack did not return a replacement subscription.");
+    }
+  } catch {
+    return json({ error: "Paystack could not schedule the new plan. Your current subscription is unchanged." }, 502);
+  }
+
+  const { data: replacementRow, error: replacementError } = await auth.supabase.from("subscriptions").insert({
+    user_id: auth.user.id, plan_code: target, status: "pending", amount_kobo: APPROVED_AMOUNTS[target], currency: "NGN",
+    paystack_customer_code: customerCode, paystack_subscription_code: replacement.subscription_code,
+    paystack_email_token: replacement.email_token, authorization_signature: reusableAuthorization,
+    current_period_start: current.current_period_end, metadata: { scheduled_replacement: true, replaces_subscription_id: current.id },
+  }).select("id").single();
+  if (replacementError || !replacementRow) {
+    try { await paystackRequest(env, "/subscription/disable", { code: replacement.subscription_code, token: replacement.email_token }); } catch { /* best effort cleanup */ }
+    return json({ error: "Could not save the scheduled plan. Your current subscription is unchanged." }, 500);
+  }
+  const { data: change, error: changeError } = await auth.supabase.from("scheduled_plan_changes").insert({
+    user_id: auth.user.id, current_subscription_id: current.id, replacement_subscription_id: replacementRow.id,
+    target_plan_code: target, effective_at: current.current_period_end, status: "scheduled",
+  }).select("id").single();
+  if (changeError || !change) {
+    await auth.supabase.from("subscriptions").update({ status: "failed" }).eq("id", replacementRow.id);
+    try { await paystackRequest(env, "/subscription/disable", { code: replacement.subscription_code, token: replacement.email_token }); } catch { /* best effort cleanup */ }
+    return json({ error: "Could not save your scheduled plan change. Your current subscription is unchanged." }, 500);
+  }
+  try {
+    await paystackRequest(env, "/subscription/disable", {
+      code: current.paystack_subscription_code, token: current.paystack_email_token,
+    });
+  } catch {
+    await auth.supabase.from("scheduled_plan_changes").update({ status: "failed", updated_at: new Date().toISOString() }).eq("id", change.id);
+    await auth.supabase.from("subscriptions").update({ status: "failed" }).eq("id", replacementRow.id);
+    try { await paystackRequest(env, "/subscription/disable", { code: replacement.subscription_code, token: replacement.email_token }); } catch { /* best effort cleanup */ }
+    return json({ error: "Could not safely switch the renewal schedule. No plan change was applied; contact support if Paystack reports a change." }, 502);
+  }
+  const { error: oldUpdateError } = await auth.supabase.from("subscriptions").update({
+    status: "non_renewing", cancel_at_period_end: true, cancelled_at: null, updated_at: new Date().toISOString(),
+  }).eq("id", current.id);
+  if (oldUpdateError) {
+    try { await paystackRequest(env, "/subscription/enable", { code: current.paystack_subscription_code, token: current.paystack_email_token }); } catch { /* manual reconciliation may be required */ }
+    await auth.supabase.from("scheduled_plan_changes").update({ status: "failed", updated_at: new Date().toISOString() }).eq("id", change.id);
+    await auth.supabase.from("subscriptions").update({ status: "failed", updated_at: new Date().toISOString() }).eq("id", replacementRow.id);
+    try { await paystackRequest(env, "/subscription/disable", { code: replacement.subscription_code, token: replacement.email_token }); } catch { /* best effort cleanup */ }
+    return json({ error: "NJS could not save the renewal switch, so it attempted to restore your current subscription. Refresh billing before trying again." }, 500);
+  }
+  return json({ success: true, scheduledChange: { id: change.id, planCode: target, effectiveAt: current.current_period_end } });
+}
+
+export async function cancelScheduledPlanChange(request: Request, env: BillingEnv) {
+  if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+  const auth = await requireUser(request, env);
+  if ("error" in auth) return json({ error: auth.error }, auth.status);
+  const { data: change, error } = await auth.supabase.from("scheduled_plan_changes")
+    .select("id, current_subscription_id, replacement_subscription_id")
+    .eq("user_id", auth.user.id).eq("status", "scheduled").maybeSingle();
+  if (error) return json({ error: "Could not load your scheduled plan change." }, 500);
+  if (!change) return json({ error: "There is no scheduled plan change to cancel." }, 404);
+  const { data: rows, error: rowsError } = await auth.supabase.from("subscriptions")
+    .select("id, paystack_subscription_code, paystack_email_token")
+    .in("id", [change.current_subscription_id, change.replacement_subscription_id]);
+  if (rowsError) return json({ error: "Could not load the subscriptions." }, 500);
+  const replacement = rows?.find((row) => row.id === change.replacement_subscription_id);
+  const current = rows?.find((row) => row.id === change.current_subscription_id);
+  if (!replacement?.paystack_subscription_code || !replacement.paystack_email_token || !current?.paystack_subscription_code || !current.paystack_email_token) {
+    return json({ error: "The scheduled subscriptions cannot be safely restored. Contact support." }, 409);
+  }
+  try {
+    await paystackRequest(env, "/subscription/disable", { code: replacement.paystack_subscription_code, token: replacement.paystack_email_token });
+    await paystackRequest(env, "/subscription/enable", { code: current.paystack_subscription_code, token: current.paystack_email_token });
+  } catch {
+    // Preserve the already-scheduled replacement if restoring the old renewal fails.
+    try { await paystackRequest(env, "/subscription/enable", { code: replacement.paystack_subscription_code, token: replacement.paystack_email_token }); } catch { /* best effort: support may need to reconcile */ }
+    return json({ error: "Paystack could not restore the original renewal. The scheduled replacement was kept where possible; contact support before retrying." }, 502);
+  }
+  const now = new Date().toISOString();
+  const { error: changeUpdateError } = await auth.supabase.from("scheduled_plan_changes")
+    .update({ status: "cancelled", updated_at: now }).eq("id", change.id).eq("status", "scheduled");
+  if (changeUpdateError) return json({ error: "Paystack was updated, but NJS could not save the cancellation. Contact support." }, 500);
+  await auth.supabase.from("subscriptions").update({ status: "failed", updated_at: now }).eq("id", replacement.id);
+  const { error: currentUpdateError } = await auth.supabase.from("subscriptions").update({
+    status: "active", cancel_at_period_end: false, cancelled_at: null, updated_at: now,
+  }).eq("id", current.id);
+  if (currentUpdateError) return json({ error: "The renewal was restored, but NJS could not update your subscription status. Refresh or contact support." }, 500);
+  return json({ success: true, scheduledChange: null });
 }
 
 export async function hmacSha512Hex(secret: string, body: string | Uint8Array): Promise<string> {
@@ -538,6 +718,7 @@ async function processSuccessfulPayment(supabase: BillingClient, env: BillingEnv
   if (Number(verified.amount) !== Number(transaction.amount_kobo)
     || Number(verified.amount) !== Number(plan.amount_kobo)
     || Number(plan.amount_kobo) !== APPROVED_AMOUNTS[transaction.plan_code]
+    || plan.billing_interval !== (transaction.plan_code.endsWith("annual") ? "annual" : "monthly")
     || verified.currency !== "NGN" || verified.currency !== plan.currency
     || verified.currency !== transaction.currency) {
     throw new Error("Payment amount or currency does not match the plan.");
@@ -571,7 +752,10 @@ async function processSuccessfulPayment(supabase: BillingClient, env: BillingEnv
     .maybeSingle();
   if (currentSubscriptionError) throw new Error("Could not load subscription after payment verification.");
   if (!currentSubscription || currentSubscription.status === "cancelled" || currentSubscription.status === "expired") return;
-  if (transaction.status === "success" && currentSubscription.current_period_end
+  const { data: pendingReplacement, error: pendingReplacementError } = await supabase.from("scheduled_plan_changes")
+    .select("id").eq("replacement_subscription_id", transaction.subscription_id).eq("status", "scheduled").maybeSingle();
+  if (pendingReplacementError) throw new Error("Could not reconcile scheduled replacement payment.");
+  if (transaction.status === "success" && !pendingReplacement && currentSubscription.current_period_end
     && Date.parse(paidAt) <= Date.parse(currentSubscription.current_period_end)) return;
   const start = new Date(paidAt);
   const nextPaystackDate = eventData?.subscription?.next_payment_date
@@ -596,9 +780,25 @@ async function processSuccessfulPayment(supabase: BillingClient, env: BillingEnv
       ?? eventData?.email_token
       ?? verified?.subscription?.email_token
       ?? undefined,
+    authorization_signature: typeof verified?.authorization?.authorization_code === "string"
+      ? verified.authorization.authorization_code : undefined,
     updated_at: new Date().toISOString(),
   }).eq("id", transaction.subscription_id);
   if (updateSubscriptionError) throw new Error("Could not activate subscription.");
+  const { data: completedChange, error: changeLookupError } = await supabase.from("scheduled_plan_changes")
+    .select("id").eq("replacement_subscription_id", transaction.subscription_id).eq("status", "scheduled").maybeSingle();
+  if (changeLookupError) throw new Error("Could not reconcile scheduled plan change.");
+  if (completedChange) {
+    const { error: changeUpdateError } = await supabase.from("scheduled_plan_changes")
+      .update({ status: "completed", updated_at: new Date().toISOString() }).eq("id", completedChange.id).eq("status", "scheduled");
+    if (changeUpdateError) throw new Error("Could not complete scheduled plan change.");
+    const { data: previous, error: previousError } = await supabase.from("scheduled_plan_changes")
+      .select("current_subscription_id").eq("id", completedChange.id).single();
+    if (previousError) throw new Error("Could not load replaced subscription.");
+    const { error: retireError } = await supabase.from("subscriptions").update({ status: "expired", cancel_at_period_end: false, updated_at: new Date().toISOString() })
+      .eq("id", previous.current_subscription_id).in("status", ["non_renewing", "cancelled", "expired"]);
+    if (retireError) throw new Error("Could not retire the replaced subscription.");
+  }
 }
 
 export async function handlePaystackWebhook(request: Request, env: BillingEnv) {
@@ -783,7 +983,11 @@ export async function handlePaystackWebhook(request: Request, env: BillingEnv) {
         if (typeof code !== "string" && typeof metadataId !== "string") break;
         if (!subscription) break;
         let nextStatus: SubscriptionStatus | null;
-        if (typeof code === "string" && ["subscription.not_renew", "subscription.disable", "subscription.expired"].includes(event.event)) {
+        if (event.event === "subscription.disable") {
+          // Paystack's disable event only stops future renewals. It must never
+          // revoke the period the customer has already paid for.
+          nextStatus = subscriptionStateTransition(event.event, subscription.status);
+        } else if (typeof code === "string" && ["subscription.not_renew", "subscription.expired"].includes(event.event)) {
           const providerStatus = await getPaystackSubscriptionStatus(env, code);
           nextStatus = reconcileSubscriptionStatus(subscription.status, providerStatus);
         } else {
@@ -798,8 +1002,13 @@ export async function handlePaystackWebhook(request: Request, env: BillingEnv) {
             : {}),
         };
         if (nextStatus) patch.status = nextStatus;
-        if (event.event === "subscription.disable" && event.data.status === "complete") patch.status = "expired";
-        if (event.event === "subscription.disable") { patch.cancelled_at = new Date().toISOString(); patch.cancel_at_period_end = false; }
+        if (event.event === "subscription.disable" && nextStatus === "non_renewing") {
+          // Applies to both user cancellation and a scheduled plan switch.
+          // effectiveSubscriptionStatus expires access at current_period_end.
+          patch.status = "non_renewing";
+          patch.cancelled_at = null;
+          patch.cancel_at_period_end = true;
+        }
         if (["subscription.not_renew", "subscription.expiring"].includes(event.event)) patch.cancel_at_period_end = true;
         if (event.event === "subscription.expired") patch.cancel_at_period_end = false;
         const { error: updateError } = await supabase.from("subscriptions").update(patch).eq("id", subscription.id);

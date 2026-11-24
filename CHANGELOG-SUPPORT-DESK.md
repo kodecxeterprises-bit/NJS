@@ -15,3 +15,11 @@ This package contains the Support Desk routing and authenticated-layout fixes.
 ## Deployment note
 
 The Cloudflare Worker must have `SUPABASE_URL` and `SUPABASE_SECRET_KEY` configured. The existing Support Desk database tables and permissions must also be present in Supabase.
+
+## 2026-11-23 — Subscription plan switching
+
+- Added private scheduled plan-change records and Worker-only access controls.
+- Added next-renewal plan and billing-interval switching through Paystack reusable authorizations.
+- Preserved current paid access through the existing period end and deferred activation of the replacement until a verified successful charge.
+- Added cancellation/restoration for a pending switch, webhook reconciliation, authorization recovery for existing Test Mode subscriptions, and payment history in account billing views.
+- Added Pricing and Settings UI for pending plan changes and cancellation.

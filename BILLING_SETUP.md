@@ -43,3 +43,11 @@ The checkout callback returns the customer to `/billing?checkout=complete`. That
 ## Local checks
 
 The repository currently has a Bun lockfile. Install using the matching package manager (`bun install --frozen-lockfile`) and run the project build, TypeScript check, and billing unit tests. Migration `supabase/migrations/20261115000032_njs_protect_paystack_subscription_tokens.sql` withholds Paystack management credentials from authenticated Data API users and adds a unique index that prevents multiple open subscriptions per user. Check for duplicate open subscriptions before applying it; the index will fail without changing data if duplicates exist. The Worker service credential retains access.
+
+## Scheduled plan and billing-interval changes
+
+The `20261123100000_njs_scheduled_subscription_plan_changes.sql` migration adds the private schedule table used by the Worker. The scheduled-plan migration was already applied to the connected NJS Supabase project. Do not reapply it there; ensure it is included in source control for fresh environments. The schedule table is intentionally inaccessible to browser clients; authenticated requests go through `/api/billing/schedule-change` and `/api/billing/schedule-change/cancel`.
+
+A plan or interval switch is scheduled for the current subscription's `current_period_end`. The Worker creates a replacement Paystack subscription using the verified reusable authorization, disables the old Paystack renewal to prevent overlapping charges, and retains the existing paid entitlement until the boundary. The replacement remains pending until Paystack reports a charge that the Worker independently verifies. Only then is the new plan activated and the previous subscription retired. A user can cancel a pending switch; the Worker disables the replacement and re-enables the original renewal.
+
+The Worker now saves the reusable Paystack authorization code from a verified successful transaction. For existing Test Mode subscriptions it attempts to recover that code by re-verifying the most recent successful transaction before scheduling a switch. If Paystack does not return a reusable authorization, the change is refused without changing the current plan. Live mode remains intentionally unsupported.

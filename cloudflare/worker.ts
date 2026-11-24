@@ -17,11 +17,13 @@ import {
 } from "./admin-routes";
 import {
   cancelSubscription,
+  cancelScheduledPlanChange,
   effectiveSubscriptionStatus,
   getBillingSubscription,
   handlePaystackWebhook,
   initializeCheckout,
   resumeSubscription,
+  schedulePlanChange,
 } from "./billing-routes";
 interface Env {
   SUPABASE_URL: string;
@@ -878,6 +880,14 @@ export default {
 
       if (url.pathname === "/api/billing/resume") {
         return await resumeSubscription(request, env);
+      }
+
+      if (url.pathname === "/api/billing/schedule-change") {
+        return await schedulePlanChange(request, env);
+      }
+
+      if (url.pathname === "/api/billing/schedule-change/cancel") {
+        return await cancelScheduledPlanChange(request, env);
       }
 
       if (url.pathname === "/api/business/save") {

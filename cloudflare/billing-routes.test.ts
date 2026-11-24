@@ -12,6 +12,8 @@ const {
   hmacSha512Hex,
   effectiveSubscriptionStatus,
   cancelSubscription,
+  cancelScheduledPlanChange,
+  schedulePlanChange,
   checkoutVerificationOutcome,
   getBillingSubscription,
   initializeCheckout,
@@ -192,11 +194,16 @@ test("maps payment and subscription events to the intended lifecycle states", ()
   assert.equal(subscriptionStateTransition("charge.failed", "past_due"), "past_due");
   assert.equal(subscriptionStateTransition("invoice.payment_failed", "active"), "past_due");
   assert.equal(subscriptionStateTransition("subscription.not_renew", "active"), "non_renewing");
-  assert.equal(subscriptionStateTransition("subscription.disable", "non_renewing"), "cancelled");
+  assert.equal(subscriptionStateTransition("subscription.disable", "active"), "non_renewing");
+  assert.equal(subscriptionStateTransition("subscription.disable", "non_renewing"), "non_renewing");
+  assert.equal(subscriptionStateTransition("subscription.disable", "past_due"), "non_renewing");
+  assert.equal(subscriptionStateTransition("subscription.disable", "pending"), null);
   assert.equal(subscriptionStateTransition("subscription.expired", "non_renewing"), "expired");
   assert.equal(subscriptionStateTransition("customer.updated", "active"), null);
   assert.equal(reconcileSubscriptionStatus("non_renewing", "active"), "active");
   assert.equal(reconcileSubscriptionStatus("active", "non-renewing"), "non_renewing");
+  assert.equal(reconcileSubscriptionStatus("active", "cancelled"), "non_renewing");
+  assert.equal(reconcileSubscriptionStatus("pending", "cancelled"), null);
   assert.equal(reconcileSubscriptionStatus("active", "attention", false), "past_due");
   assert.equal(reconcileSubscriptionStatus("past_due", "active", false), null);
   assert.equal(reconcileSubscriptionStatus("expired", "active"), null);
@@ -210,6 +217,8 @@ test("expires past-due access only after the paid period ends", () => {
   const now = Date.parse("2026-11-14T12:00:00.000Z");
   assert.equal(effectiveSubscriptionStatus("past_due", "2026-11-14T11:59:59.000Z", now), "expired");
   assert.equal(effectiveSubscriptionStatus("past_due", "2026-11-14T12:00:01.000Z", now), "past_due");
+  assert.equal(effectiveSubscriptionStatus("non_renewing", "2026-11-14T12:00:01.000Z", now), "non_renewing");
+  assert.equal(effectiveSubscriptionStatus("non_renewing", "2026-11-14T11:59:59.000Z", now), "expired");
   assert.equal(effectiveSubscriptionStatus("active", null, now), "active");
 });
 
@@ -234,9 +243,13 @@ test("requires authentication for subscription retrieval and management", async 
   const get = await getBillingSubscription(new Request("https://njs.test/api/billing/subscription"), env);
   const cancel = await cancelSubscription(new Request("https://njs.test/api/billing/cancel", { method: "POST" }), env);
   const resume = await resumeSubscription(new Request("https://njs.test/api/billing/resume", { method: "POST" }), env);
+  const schedule = await schedulePlanChange(new Request("https://njs.test/api/billing/schedule-change", { method: "POST", body: JSON.stringify({ planCode: "pro_annual" }) }), env);
+  const cancelSchedule = await cancelScheduledPlanChange(new Request("https://njs.test/api/billing/schedule-change/cancel", { method: "POST" }), env);
   assert.equal(get.status, 401);
   assert.equal(cancel.status, 401);
   assert.equal(resume.status, 401);
+  assert.equal(schedule.status, 401);
+  assert.equal(cancelSchedule.status, 401);
 });
 
 test("computes and compares Paystack SHA-512 signatures", async () => {
@@ -372,4 +385,25 @@ test("a delayed failure event cannot overwrite a payment that concurrently becam
 test("produces a stable idempotency key for identical deliveries", async () => {
   assert.equal(await webhookEventKey("body"), await webhookEventKey("body"));
   assert.notEqual(await webhookEventKey("body"), await webhookEventKey("different"));
+});
+
+
+test("scheduled plan-change migration is private and permits only one pending switch per user", () => {
+  const sql = readFileSync("supabase/migrations/20261123100000_njs_scheduled_subscription_plan_changes.sql", "utf8");
+  assert.match(sql, /create table if not exists public\.scheduled_plan_changes/i);
+  assert.match(sql, /enable row level security/i);
+  assert.match(sql, /revoke all privileges on table public\.scheduled_plan_changes from anon, authenticated/i);
+  assert.match(sql, /grant all privileges on table public\.scheduled_plan_changes to service_role/i);
+  assert.match(sql, /where status = 'scheduled'/i);
+  assert.match(sql, /one_pending_per_user/i);
+});
+
+test("subscription renewal changes are exposed through authenticated worker routes only", () => {
+  const worker = readFileSync("cloudflare/worker.ts", "utf8");
+  const routes = readFileSync("cloudflare/billing-routes.ts", "utf8");
+  assert.match(worker, /\/api\/billing\/schedule-change/);
+  assert.match(worker, /\/api\/billing\/schedule-change\/cancel/);
+  assert.match(routes, /authorization_signature: typeof verified\?\.authorization\?\.authorization_code/);
+  assert.match(routes, /patch\.status = "non_renewing"/);
+  assert.match(routes, /current paid access/);
 });

@@ -16,6 +16,7 @@ interface BillingSubscription {
   currency: string;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  scheduledChange?: { id: string; planCode: string; plan: 'pro' | 'enterprise' | 'free'; billingInterval: 'monthly' | 'annually'; effectiveAt: string } | null;
 }
 
 const naira = (amount: number) => new Intl.NumberFormat('en-NG', {
@@ -48,6 +49,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   const [error, setError] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(false);
+  const [changeBusy, setChangeBusy] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -96,6 +98,29 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
   const activeSubscription = subscription && ['active', 'non_renewing', 'past_due'].includes(subscription.status);
 
+  const scheduleChange = async (planCode: string) => {
+    if (!user) { onNavigate('sign-in'); return; }
+    setChangeBusy(true); setError(null);
+    try {
+      await apiFetch('/api/billing/schedule-change', { method: 'POST', body: JSON.stringify({ planCode }) });
+      const refreshed = await apiFetch('/api/billing/subscription');
+      setSubscription(refreshed.subscription ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not schedule your plan change.');
+    } finally { setChangeBusy(false); }
+  };
+
+  const cancelScheduledChange = async () => {
+    setChangeBusy(true); setError(null);
+    try {
+      await apiFetch('/api/billing/schedule-change/cancel', { method: 'POST' });
+      const refreshed = await apiFetch('/api/billing/subscription');
+      setSubscription(refreshed.subscription ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not cancel your scheduled plan change.');
+    } finally { setChangeBusy(false); }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-surface text-on-surface font-sans">
       <header className="sticky top-0 z-40 border-b border-outline-variant/30 bg-surface/90 px-6 py-4 backdrop-blur-xl lg:px-16">
@@ -142,7 +167,14 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
               <p className="mt-1 text-sm text-on-surface-variant">{subscription?.status === 'non_renewing' || subscription?.cancelAtPeriodEnd ? 'Your plan is set to end' : 'Your subscription is active'}{subscription?.currentPeriodEnd ? ` on ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}` : ''}. Manage your billing in account settings.</p>
             </div>
           </div>
-          <button onClick={() => onNavigate('settings')} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-on-primary transition hover:opacity-90">Manage billing <ArrowRight size={16} /></button>
+          <div className="flex flex-col gap-2 sm:items-end">
+            <button onClick={() => onNavigate('settings')} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-on-primary transition hover:opacity-90">Manage billing <ArrowRight size={16} /></button>
+            {subscription?.scheduledChange && <button onClick={() => void cancelScheduledChange()} disabled={changeBusy} className="text-xs font-semibold text-error underline disabled:opacity-50">Cancel scheduled change</button>}
+          </div>
+        </div>}
+        {subscription?.scheduledChange && <div className="mx-auto mb-8 max-w-4xl rounded-2xl border border-primary/20 bg-surface-container-low p-5 text-sm">
+          <p className="font-bold">Upcoming plan: {subscription.scheduledChange.plan === 'enterprise' ? 'Enterprise' : 'Pro'} · {subscription.scheduledChange.billingInterval}</p>
+          <p className="mt-1 text-on-surface-variant">Takes effect {new Date(subscription.scheduledChange.effectiveAt).toLocaleDateString()}. Your current paid access continues until then. No charge is taken now.</p>
         </div>}
 
         <div className="mx-auto grid max-w-5xl grid-cols-1 items-stretch gap-6 lg:grid-cols-3 lg:gap-7">
@@ -180,10 +212,10 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
                 <p className="mt-2 text-xs leading-5 text-on-surface-variant">Secure checkout powered by Paystack. Your billing interval and amount are confirmed before payment.</p>
                 <div className="mt-3 flex items-center gap-2 text-xs text-on-surface-variant"><ShieldCheck size={15} className="text-primary" /> Payment details handled by Paystack</div>
               </div>
-              <button onClick={() => void checkout(planCode)} disabled={busyPlan !== null || loadingSubscription || Boolean(activeSubscription)} className={`w-full rounded-xl px-5 py-3.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${plan.featured ? 'bg-primary text-on-primary hover:opacity-90' : 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest'}`}>
-                {busyPlan === planCode ? 'Opening secure checkout…' : isCurrentPlan ? 'Current plan' : activeSubscription ? 'Manage current plan' : user ? `Choose ${plan.name}` : 'Sign in to subscribe'}
+              <button onClick={() => activeSubscription ? void scheduleChange(planCode) : void checkout(planCode)} disabled={busyPlan !== null || loadingSubscription || changeBusy || Boolean(subscription?.scheduledChange) || Boolean(isCurrentPlan)} className={`w-full rounded-xl px-5 py-3.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${plan.featured ? 'bg-primary text-on-primary hover:opacity-90' : 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest'}`}>
+                {busyPlan === planCode ? 'Opening secure checkout…' : changeBusy ? 'Updating renewal…' : isCurrentPlan ? 'Current plan' : activeSubscription ? `Switch to ${plan.name} at renewal` : user ? `Choose ${plan.name}` : 'Sign in to subscribe'}
               </button>
-              {activeSubscription && <p className="mt-3 text-center text-xs text-on-surface-variant">Review your current subscription and renewal options in account settings.</p>}
+              {activeSubscription && <p className="mt-3 text-center text-xs text-on-surface-variant">Plan changes take effect at your next renewal. No immediate charge.</p>}
             </article>;
           })}
         </div>

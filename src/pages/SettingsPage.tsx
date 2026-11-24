@@ -46,6 +46,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate, initialT
     }
   };
 
+  const cancelScheduledPlanChange = async () => {
+    setBillingBusy(true); setBillingError(null);
+    try {
+      await apiFetch('/api/billing/schedule-change/cancel', { method: 'POST' });
+      const refreshed = await apiFetch('/api/billing/subscription');
+      setBillingDetails(refreshed.subscription ?? null);
+      await refreshUser();
+    } catch (error) {
+      setBillingError(error instanceof Error ? error.message : 'Could not cancel the scheduled plan change.');
+    } finally { setBillingBusy(false); }
+  };
+
   const handleConnectGoogle = async () => {
     setGoogleConnecting(true);
     setGoogleStatusMsg(null);
@@ -274,9 +286,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate, initialT
                   {billingDetails?.amountKobo ? ` · ${new Intl.NumberFormat('en-NG', { style: 'currency', currency: billingDetails.currency || 'NGN', maximumFractionDigits: 0 }).format(billingDetails.amountKobo / 100)}` : ''}
                 </p>
                 {billingDetails?.currentPeriodEnd && <p className="text-sm text-on-surface-variant">{billingDetails.cancelAtPeriodEnd ? 'Access ends' : 'Next renewal'}: {new Date(billingDetails.currentPeriodEnd).toLocaleDateString()}</p>}
-                {billingDetails?.latestPayment && <div className="text-sm text-on-surface-variant">
-                  <p>Latest payment: {new Intl.NumberFormat('en-NG', { style: 'currency', currency: billingDetails.latestPayment.currency || 'NGN', maximumFractionDigits: 0 }).format(billingDetails.latestPayment.amountKobo / 100)} · {billingDetails.latestPayment.status}</p>
-                  <p>Reference: <span className="font-mono">{billingDetails.latestPayment.reference}</span>{billingDetails.latestPayment.paidAt ? ` · ${new Date(billingDetails.latestPayment.paidAt).toLocaleDateString()}` : ''}</p>
+                {billingDetails?.scheduledChange && <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2">
+                  <p className="text-sm font-bold text-on-surface">Upcoming plan: {billingDetails.scheduledChange.plan === 'enterprise' ? 'Enterprise' : 'Pro'} · {billingDetails.scheduledChange.billingInterval}</p>
+                  <p className="text-xs text-on-surface-variant">Starts {new Date(billingDetails.scheduledChange.effectiveAt).toLocaleDateString()}. Your current paid access remains active until then. No charge is taken now.</p>
+                  <button onClick={() => void cancelScheduledPlanChange()} disabled={billingBusy} className="rounded-lg border border-outline-variant px-3 py-2 text-xs font-semibold disabled:opacity-50">Cancel scheduled change</button>
+                </div>}
+                {billingDetails?.paymentHistory?.length > 0 && <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-on-surface">Payment history</h4>
+                  <div className="divide-y divide-outline-variant/30 rounded-xl border border-outline-variant/30">
+                    {billingDetails.paymentHistory.map((payment: any) => <div key={payment.reference} className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs">
+                      <div><p className="font-semibold text-on-surface">{new Intl.NumberFormat('en-NG', { style: 'currency', currency: payment.currency || 'NGN', maximumFractionDigits: 0 }).format(payment.amountKobo / 100)}</p><p className="text-on-surface-variant">{payment.paidAt ? new Date(payment.paidAt).toLocaleDateString() : new Date(payment.createdAt).toLocaleDateString()} · {payment.reference}</p></div>
+                      <span className="capitalize text-on-surface-variant">{payment.status}</span>
+                    </div>)}
+                  </div>
                 </div>}
                 {(billingDetails?.status === 'active' || billingDetails?.status === 'non_renewing' || billingDetails?.status === 'past_due') && <button onClick={() => void manageBilling(billingDetails.cancelAtPeriodEnd ? 'resume' : 'cancel')} disabled={billingBusy} className="px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-semibold disabled:opacity-60">
                   {billingBusy ? 'Updating…' : billingDetails.cancelAtPeriodEnd ? 'Resume subscription' : 'Cancel at period end'}

@@ -193,6 +193,24 @@ export interface BillingDatabase {
           },
         ];
       };
+      scheduled_plan_changes: {
+        Row: {
+          id: string; user_id: string; current_subscription_id: string; replacement_subscription_id: string;
+          target_plan_code: string; effective_at: string; status: "scheduled" | "completed" | "cancelled" | "failed";
+          created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; current_subscription_id: string; replacement_subscription_id: string;
+          target_plan_code: string; effective_at: string; status?: "scheduled" | "completed" | "cancelled" | "failed";
+          created_at?: string; updated_at?: string;
+        };
+        Update: {
+          id?: string; user_id?: string; current_subscription_id?: string; replacement_subscription_id?: string;
+          target_plan_code?: string; effective_at?: string; status?: "scheduled" | "completed" | "cancelled" | "failed";
+          created_at?: string; updated_at?: string;
+        };
+        Relationships: [];
+      };
       paystack_webhook_events: {
         Row: {
           id: string;
