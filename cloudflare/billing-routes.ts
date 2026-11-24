@@ -669,7 +669,7 @@ async function verifyTransaction(env: BillingEnv, reference: string) {
  * NJS plan price. Only accept a charge when Paystack explicitly reports the
  * requested amount and fees and their arithmetic reconciles exactly.
  */
-function verifiedPlanAmountMatches(verified: any, expectedAmount: number): boolean {
+export function verifiedPlanAmountMatches(verified: any, expectedAmount: number): boolean {
   const amount = Number(verified?.amount);
   const fees = Number(verified?.fees);
   const requestedAmount = Number(verified?.requested_amount);
