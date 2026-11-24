@@ -406,7 +406,7 @@ test("subscription renewal changes are exposed through authenticated worker rout
   assert.match(worker, /\/api\/billing\/schedule-change\/cancel/);
   assert.match(routes, /authorization_signature: typeof verified\?\.authorization\?\.authorization_code/);
   assert.match(routes, /patch\.status = "non_renewing"/);
-  assert.match(routes, /current paid access/);
+  assert.match(routes, /Keep entitlement until current_period_end/);
 });
 test("accepts Paystack fees only when the total reconciles to the approved plan price", () => {
   const baseAmount = 15_000_000;
