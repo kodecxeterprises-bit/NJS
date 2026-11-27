@@ -77,4 +77,3 @@ export async function generateOpenAIText(
 
   return extractedText;
 }
- 
