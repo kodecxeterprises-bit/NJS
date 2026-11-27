@@ -3,6 +3,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateOpenAIText } from "./openai";
 
+interface OpenAIRequestBody {
+  model?: string;
+  input?: string;
+  max_output_tokens?: number;
+}
+
 test("OpenAI helper rejects missing API configuration", async () => {
   await assert.rejects(
     generateOpenAIText({}, "Hello"),
@@ -19,7 +25,7 @@ test("OpenAI helper rejects a blank API key", async () => {
 
 test("OpenAI helper calls Responses API and extracts output text", async () => {
   let requestedUrl = "";
-  let requestedBody: any;
+  let requestedBody: OpenAIRequestBody = {};
   let authorization = "";
 
   const result = await generateOpenAIText(
@@ -50,7 +56,7 @@ test("OpenAI helper calls Responses API and extracts output text", async () => {
 });
 
 test("OpenAI helper uses the default model when none is configured", async () => {
-  let requestedBody: any;
+  let requestedBody: OpenAIRequestBody = {};
 
   await generateOpenAIText(
     { OPENAI_API_KEY: "test-key" },
@@ -65,7 +71,7 @@ test("OpenAI helper uses the default model when none is configured", async () =>
 });
 
 test("OpenAI helper trims the configured model name", async () => {
-  let requestedBody: any;
+  let requestedBody: OpenAIRequestBody = {};
 
   await generateOpenAIText(
     { OPENAI_API_KEY: "test-key", OPENAI_MODEL: "  gpt-6-luna  " },
